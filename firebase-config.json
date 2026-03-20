@@ -1,8 +1,8 @@
 {
-  "apiKey": "",
-  "authDomain": "",
-  "projectId": "",
-  "storageBucket": "",
-  "messagingSenderId": "",
-  "appId": ""
+  "apiKey": "AIzaSyDvZel10KNfN2-rDEsF1s1RfuADYcQVdJU",
+  "authDomain": "noic-assessment.firebaseapp.com",
+  "projectId": "noic-assessment",
+  "storageBucket": "noic-assessment.firebasestorage.app",
+  "messagingSenderId": "499807252607",
+  "appId": "1:499807252607:web:771330814bcd1963ad0f4a"
 }
