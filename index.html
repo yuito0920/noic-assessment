@@ -492,8 +492,11 @@ function localSaveStore(st){
 /* --- Firestore 読み書き --- */
 async function saveGuestToCloud(gid,guest){
   if(!db) return;
-  try{await db.collection("guests").doc(gid).set(guest);}
-  catch(e){console.warn("cloud save error",e);}
+  try{
+    // 削除後に遅延到着した set がドキュメントを復活させない（最後の1人が消えない原因になり得る）
+    if(!store.guests[gid]||store.guests[gid]!==guest)return;
+    await db.collection("guests").doc(gid).set(guest);
+  }catch(e){console.warn("cloud save error",e);}
 }
 async function deleteGuestFromCloud(gid){
   if(!db) return true;
