@@ -422,31 +422,28 @@ const DOMAINS={
 // 合計: 10+10+3+3+4+2+4+4+10 = 50点
 
 // ══════════════════════════════════════════════════════
-// FIREBASE CONFIG
-// ここにご自身の Firebase プロジェクトの設定値を貼り付けてください。
-// console.firebase.google.com → プロジェクト → ⚙ 設定 → マイアプリ → SDK の設定と構成
+// FIREBASE CONFIG（同じフォルダの firebase-config.json を読む）
+// 本番: GitHub の firebase-config.json をブラウザで編集するだけで反映（HTMLの書き換え不要）
 // ══════════════════════════════════════════════════════
-const FB_CONFIG = {
-  apiKey:            "YOUR_API_KEY",
-  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId:         "YOUR_PROJECT_ID",
-  storageBucket:     "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId:             "YOUR_APP_ID"
-};
-/** Firestore 未設定のときは null（ローカルのみ動作） */
 let db = null;
-(function initFirebase(){
-  const ok = FB_CONFIG.apiKey && FB_CONFIG.apiKey !== "YOUR_API_KEY" &&
-    FB_CONFIG.projectId && FB_CONFIG.projectId !== "YOUR_PROJECT_ID";
-  if(!ok) return;
+async function initFirebaseFromJson(){
+  db = null;
+  if(location.protocol==="file:") return false;
   try{
-    firebase.initializeApp(FB_CONFIG);
+    const r = await fetch("firebase-config.json",{cache:"no-store"});
+    if(!r.ok) return false;
+    const cfg = await r.json();
+    const key = (cfg.apiKey && String(cfg.apiKey).trim()) || "";
+    const pid = (cfg.projectId && String(cfg.projectId).trim()) || "";
+    if(!key || !pid) return false;
+    firebase.initializeApp(cfg);
     db = firebase.firestore();
+    return true;
   }catch(e){
-    console.warn("Firebase init failed", e);
+    console.warn("firebase-config.json 読み込み失敗", e);
+    return false;
   }
-})();
+}
 
 // ══════════════════════════════════════════════════════
 // STORAGE（ローカル + Firestore 二重保存）
@@ -1328,6 +1325,8 @@ async function initApp(){
   store=migrateStore(loadStore());
   renderGuestList();
 
+  await initFirebaseFromJson();
+
   // 2. Firestoreから読み込んでマージ（クラウドデータ優先）
   try{
     const cloud=await loadFromCloud();
@@ -1347,7 +1346,7 @@ async function initApp(){
       startRealtimeSync();
       document.getElementById("saveBadge").textContent="☁ クラウド接続";
     }else{
-      document.getElementById("saveBadge").textContent="ローカル（FB未設定）";
+      document.getElementById("saveBadge").textContent="ローカル（firebase-config 未設定）";
     }
   }catch(e){
     console.warn("Firestore接続失敗、ローカルで動作中:",e);
