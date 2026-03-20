@@ -1,0 +1,1370 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>NOIC 脳アセスメント</title>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<!-- Firebase (compat SDK) -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<style>
+:root{
+  --accent:#C05C00;--accent-dark:#9E4A00;--accent-light:#FDF0E6;
+  --blue-l:#DAEEF3;--green-l:#E2EFDA;--yellow-l:#FFF2CC;
+  --orange-l:#FCE4D6;--purple-l:#E2D9F3;--pink-l:#FFE6E6;--gray-l:#F2F2F2;
+  --teal-l:#E0F2F1;--deepred-l:#FCE4EC;
+  --red:#C00000;--bg:#FBF7F4;--card:#FFF;--border:#E8D8CC;--text:#2A2A2A;
+  --sub:#777;--shadow:0 2px 8px rgba(0,0,0,.08);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"Hiragino Kaku Gothic ProN","Meiryo",sans-serif;background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh;padding-bottom:80px}
+
+/* Header */
+.header{background:var(--accent);color:#FFF;padding:12px 16px;position:sticky;top:0;z-index:90;display:flex;align-items:center;gap:10px;box-shadow:0 2px 6px rgba(0,0,0,.15)}
+.header h1{font-size:16px;font-weight:700;flex:1}
+.save-badge{font-size:10px;background:rgba(255,255,255,.25);padding:2px 10px;border-radius:10px;white-space:nowrap}
+
+/* Nav */
+.nav{position:fixed;bottom:0;left:0;right:0;background:#FFF;border-top:1px solid var(--border);display:flex;z-index:100;box-shadow:0 -2px 8px rgba(0,0,0,.06)}
+.nav-btn{flex:1;padding:8px 4px;text-align:center;font-size:10px;color:var(--sub);cursor:pointer;transition:.2s;border:none;background:none}
+.nav-btn.active{color:var(--accent);font-weight:700}
+.nav-btn svg{display:block;margin:0 auto 2px;width:22px;height:22px;stroke:currentColor}
+.nav-btn.active svg{stroke:var(--accent)}
+
+/* Pages */
+.page{display:none;padding:16px;max-width:800px;margin:0 auto}
+.page.active{display:block}
+
+/* Avatar — standalone (not scoped to .guest-card) */
+.avatar{
+  width:40px;height:40px;border-radius:50%;
+  background:var(--accent);color:#FFF;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:17px;font-weight:700;flex-shrink:0;
+}
+
+/* Cards */
+.card{background:var(--card);border-radius:12px;box-shadow:var(--shadow);margin-bottom:12px;overflow:hidden}
+.card-header{padding:12px 16px;font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.card-header .arrow{transition:.3s;font-size:12px}
+.card-header.open .arrow{transform:rotate(90deg)}
+.card-body{padding:0 16px 12px;display:none}
+.card-body.open{display:block}
+
+/* Assessment item */
+.item{padding:10px 0;border-bottom:1px solid #F0F0F0}
+.item:last-child{border-bottom:none}
+.item-name{font-size:13px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.score-badge{font-size:11px;padding:1px 7px;border-radius:8px;background:#EEE;color:var(--sub);min-width:22px;text-align:center;font-weight:700}
+.score-badge.s0{background:#FFCCCC;color:#900}
+.score-badge.s1{background:#FFF0CC;color:#A06000}
+.score-badge.s2{background:#D4EDDA;color:#0A5A1A}
+.score-badge.s5{background:#D4EDDA;color:#0A5A1A}
+.opts{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.opt{padding:6px 12px;border-radius:20px;font-size:12px;border:1.5px solid var(--border);background:#FFF;cursor:pointer;transition:.15s;user-select:none;white-space:nowrap}
+.opt:hover{border-color:var(--accent);color:var(--accent)}
+.opt.selected{color:#FFF;border-color:transparent}
+.opt.s0.selected{background:#C44}
+.opt.s1.selected{background:#C87000}
+.opt.s2.selected{background:#2A8}
+
+/* Multi-check (固定視など) */
+.multi-checks{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.multi-checks label{display:flex;align-items:center;gap:0;font-size:12px;cursor:pointer;padding:6px 12px;border-radius:20px;border:1.5px solid var(--border);background:#FFF;transition:.15s;user-select:none;white-space:nowrap}
+.multi-checks label:hover{border-color:var(--accent);color:var(--accent)}
+.multi-checks label.mc-checked{color:#FFF;border-color:transparent;background:#C44}
+.multi-checks label.mc-fuka{background:#888;border-color:transparent;color:#FFF}
+.multi-checks input[type="checkbox"]{display:none}
+.multi-hint{font-size:10px;color:var(--sub);margin-bottom:4px;line-height:1.5}
+/* Memo */
+.memo-input{width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;font-family:inherit;color:var(--text);background:#FAFAFA;outline:none;resize:none;line-height:1.4;transition:.2s}
+.memo-input:focus{border-color:var(--accent);background:#FFF}
+.memo-label{font-size:10px;color:var(--sub);margin-bottom:3px;display:block}
+
+/* Region colors */
+.region-前頭葉{border-left:4px solid #5B9BD5}.region-前頭葉 .card-header{background:var(--blue-l)}
+.region-小脳{border-left:4px solid #70AD47}.region-小脳 .card-header{background:var(--green-l)}
+.region-頭頂葉{border-left:4px solid #FFC000}.region-頭頂葉 .card-header{background:var(--yellow-l)}
+.region-側頭葉{border-left:4px solid #ED7D31}.region-側頭葉 .card-header{background:var(--orange-l)}
+.region-後頭葉{border-left:4px solid #7030A0}.region-後頭葉 .card-header{background:var(--purple-l)}
+.region-島皮質{border-left:4px solid #CC4444}.region-島皮質 .card-header{background:var(--pink-l)}
+.region-迷走神経{border-left:4px solid #888}.region-迷走神経 .card-header{background:var(--gray-l)}
+.region-大脳基底核・中脳{border-left:4px solid #00897B}.region-大脳基底核・中脳 .card-header{background:var(--teal-l)}
+.region-原始反射{border-left:4px solid #AD1457}.region-原始反射 .card-header{background:var(--deepred-l)}
+
+/* Guest info bar (assessment page) */
+.guest-info-bar{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#FFF;border-radius:10px;box-shadow:var(--shadow);margin-bottom:12px;border-left:4px solid var(--accent)}
+.guest-info-bar .info{flex:1}
+.guest-info-bar .name{font-weight:700;font-size:14px}
+.guest-info-bar .meta{font-size:11px;color:var(--sub)}
+
+/* Guest list */
+.guest-row{display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;transition:.15s;border-bottom:1px solid #F5F5F5}
+.guest-row:last-child{border-bottom:none}
+.guest-row:hover{background:#F5FAEA}
+.guest-row .info{flex:1}
+.guest-row .gname{font-weight:700;font-size:14px}
+.guest-row .gmeta{font-size:11px;color:var(--sub)}
+.guest-row .gscore{font-size:22px;font-weight:700;color:var(--accent)}
+
+/* Forms */
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:12px;font-weight:600;color:var(--sub);margin-bottom:4px}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;outline:none;transition:.2s;background:#FFF}
+.form-group input:focus,.form-group select:focus{border-color:var(--accent)}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600;border:none;cursor:pointer;transition:.15s;font-family:inherit}
+.btn-primary{background:var(--accent);color:#FFF}.btn-primary:hover{background:var(--accent-dark)}
+.btn-danger{background:var(--red);color:#FFF}
+.btn-outline{background:#FFF;border:1.5px solid var(--border);color:var(--text)}.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+.btn-sm{padding:6px 14px;font-size:12px}
+.btn-block{width:100%}
+
+/* Score bar */
+.score-bar{position:fixed;bottom:60px;left:0;right:0;background:#FFF;border-top:1px solid var(--border);padding:8px 16px;display:none;z-index:89;box-shadow:0 -2px 8px rgba(0,0,0,.06)}
+.score-bar.active{display:flex;align-items:center;gap:8px}
+.domain-pill{padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;background:#F0F0F0;white-space:nowrap}
+.domain-scores{display:flex;gap:6px;flex:1;overflow-x:auto;align-items:center}
+.total-box{text-align:right;padding-left:12px;border-left:2px solid var(--border);min-width:65px}
+.total-num{font-size:24px;font-weight:700;color:var(--accent)}
+.total-lbl{font-size:9px;color:var(--sub)}
+
+/* Progress */
+.progress-bar{height:5px;background:#E0E0E0;border-radius:3px;overflow:hidden}
+.progress-bar .fill{height:100%;background:var(--accent);transition:.3s;border-radius:3px}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.active{display:flex}
+.modal{background:#FFF;border-radius:16px;padding:24px;max-width:420px;width:100%;max-height:85vh;overflow-y:auto}
+.modal h2{font-size:18px;margin-bottom:16px}
+.modal-actions{display:flex;gap:8px;margin-top:20px}
+.modal-actions .btn{flex:1}
+
+/* Results */
+.chart-wrap{max-width:340px;margin:0 auto;padding:12px}
+.domain-row{margin-bottom:10px}
+.domain-row .dr-top{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px}
+.domain-row .dr-bar{height:8px;background:#E8E8E8;border-radius:4px;overflow:hidden}
+.domain-row .dr-fill{height:100%;border-radius:4px;transition:.4s}
+
+/* Toast */
+.toast{position:fixed;top:62px;left:50%;transform:translateX(-50%) translateY(-10px);background:#2A3A2A;color:#FFF;padding:9px 20px;border-radius:20px;font-size:13px;z-index:300;opacity:0;transition:.3s;white-space:nowrap;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* Empty */
+.empty{text-align:center;padding:40px 20px;color:var(--sub)}
+.backup-info{background:#FDF3E7;border:1px solid #F0C090;border-radius:8px;padding:12px;font-size:12px;color:#7A3A00;margin-bottom:16px}
+
+/* Edit guest button in info bar */
+.edit-btn{display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:600;border:1.5px solid var(--accent);color:var(--accent);background:#FFF;cursor:pointer;transition:.15s}
+.edit-btn:hover{background:var(--accent-light)}
+
+/* Guest edit row in list */
+.guest-edit-row{display:flex;gap:6px;padding:8px 16px 12px;border-top:1px solid #F5F5F5;background:#FAFAFA}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1>NOIC 脳アセスメント</h1>
+  <span class="save-badge" id="saveBadge">—</span>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- ▼ PAGE: Guest List -->
+<div class="page active" id="pageGuests">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h2 style="font-size:18px">ゲスト一覧</h2>
+    <button class="btn btn-primary btn-sm" onclick="openNewGuestModal()">＋ 新規ゲスト</button>
+  </div>
+  <div class="card" id="guestList"></div>
+</div>
+
+<!-- ▼ PAGE: Assessment -->
+<div class="page" id="pageAssess">
+  <div class="guest-info-bar" id="assessGuestInfo">
+    <div class="avatar" id="assessAvatar">?</div>
+    <div class="info">
+      <div class="name" id="assessName">—</div>
+      <div class="meta" id="assessMeta">—</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end">
+      <button class="edit-btn" onclick="openEditGuestModal()">✏ 編集</button>
+      <button class="btn btn-sm" style="color:var(--red);border:1.5px solid var(--red);background:#FFF;border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer" onclick="openDeleteModal()">🗑 削除</button>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px">
+    <div class="form-group" style="flex:1;margin:0">
+      <label>測定日</label>
+      <input type="date" id="assessDate">
+    </div>
+    <button class="btn btn-outline btn-sm" onclick="expandAll()">全て開く</button>
+    <button class="btn btn-outline btn-sm" onclick="collapseAll()">閉じる</button>
+  </div>
+  <div class="progress-bar"><div class="fill" id="progressFill" style="width:0%"></div></div>
+  <p style="font-size:11px;color:var(--sub);margin:3px 0 12px" id="progressText">0 / 46 入力済み</p>
+  <div id="assessItems"></div>
+</div>
+
+<!-- ▼ PAGE: Results -->
+<div class="page" id="pageResults">
+  <div id="resultsContent"></div>
+</div>
+
+<!-- ▼ PAGE: Data -->
+<div class="page" id="pageData">
+  <h2 style="font-size:18px;margin-bottom:16px">データ管理</h2>
+  <div class="backup-info">🛡 入力データはこのデバイスに自動保存されます。定期的にバックアップをエクスポートしてください。</div>
+  <div class="card">
+    <div class="card-header" style="background:var(--accent-light)">📤 エクスポート</div>
+    <div class="card-body open" style="display:block;padding-top:12px">
+      <button class="btn btn-primary btn-block" onclick="exportCurrentExcel()" style="margin-bottom:8px">📊 現在のゲスト → Excel出力</button>
+      <button class="btn btn-outline btn-block btn-sm" onclick="exportAssessmentMD()" style="margin-bottom:8px;border-color:#2E7D32;color:#2E7D32">📝 レポート用MD出力（脳アセスメント.md）</button>
+      <div class="form-group" style="margin-top:12px">
+        <label>メールでExcelを送信</label>
+        <div style="display:flex;gap:8px">
+          <input type="email" id="emailTo" placeholder="例: staff@example.com" style="flex:1">
+          <button class="btn btn-outline btn-sm" onclick="emailExcel()">送信</button>
+        </div>
+      </div>
+      <button class="btn btn-outline btn-block btn-sm" onclick="exportAllJSON()" style="margin-top:8px">💾 全データバックアップ（JSON）</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <div class="card-header" style="background:#FFF9E6">📥 バックアップから復元</div>
+    <div class="card-body open" style="display:block;padding-top:12px">
+      <button class="btn btn-outline btn-block btn-sm" onclick="document.getElementById('importFile').click()">JSONファイルから復元</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
+    </div>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <div class="card-header" style="background:#FFEBEE">🗑 ゴミ箱（30日間保管）</div>
+    <div class="card-body open" style="display:block;padding-top:12px" id="trashList"></div>
+  </div>
+</div>
+
+<!-- Score bar -->
+<div class="score-bar" id="scoreBar">
+  <div class="domain-scores" id="domainScores"></div>
+  <div class="total-box">
+    <div class="total-num" id="totalScore">—</div>
+    <div class="total-lbl">/ 50点</div>
+  </div>
+</div>
+
+<!-- Bottom Nav -->
+<nav class="nav">
+  <button class="nav-btn active" onclick="showPage('pageGuests',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+    ゲスト
+  </button>
+  <button class="nav-btn" onclick="showPage('pageAssess',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+    入力
+  </button>
+  <button class="nav-btn" onclick="showPage('pageResults',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21.21 15.89A10 10 0 118 2.83"/><path d="M22 12A10 10 0 0012 2v10z"/></svg>
+    結果
+  </button>
+  <button class="nav-btn" onclick="showPage('pageData',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+    データ
+  </button>
+</nav>
+
+<!-- Modal: New Guest -->
+<div class="modal-overlay" id="modalNewGuest">
+  <div class="modal">
+    <h2>新規ゲスト登録</h2>
+    <div class="form-group"><label>名前 *</label><input id="newName" placeholder="例: たなか たろう"></div>
+    <div style="display:flex;gap:8px">
+      <div class="form-group" style="flex:1"><label>性別</label>
+        <select id="newGender"><option value="">—</option><option>男</option><option>女</option></select></div>
+      <div class="form-group" style="flex:1"><label>年齢</label><input id="newAge" placeholder="例: 8歳"></div>
+    </div>
+    <div class="form-group"><label>ステータス（園・学校など）</label><input id="newStatus" placeholder="例: 小学2年生（公立）"></div>
+    <div class="form-group"><label>診断名</label><input id="newDiag" placeholder="例: 特になし / ADHD など"></div>
+    <div class="form-group"><label>脳バランス</label>
+      <select id="newBalance"><option value="">—</option><option>左ヘミー原始反射</option><option>右ヘミー原始反射</option><option>混合</option><option>未評価</option></select></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('modalNewGuest')">キャンセル</button>
+      <button class="btn btn-primary" onclick="createGuest()">登録する</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Edit Guest -->
+<div class="modal-overlay" id="modalEditGuest">
+  <div class="modal">
+    <h2>✏ ゲスト情報を編集</h2>
+    <div class="form-group"><label>名前 *</label><input id="editName" placeholder="例: たなか たろう"></div>
+    <div style="display:flex;gap:8px">
+      <div class="form-group" style="flex:1"><label>性別</label>
+        <select id="editGender"><option value="">—</option><option>男</option><option>女</option></select></div>
+      <div class="form-group" style="flex:1"><label>年齢</label><input id="editAge" placeholder="例: 8歳"></div>
+    </div>
+    <div class="form-group"><label>ステータス（園・学校など）</label><input id="editStatus" placeholder="例: 小学2年生（公立）"></div>
+    <div class="form-group"><label>診断名</label><input id="editDiag" placeholder="例: 特になし / ADHD など"></div>
+    <div class="form-group"><label>脳バランス</label>
+      <select id="editBalance"><option value="">—</option><option>左ヘミー原始反射</option><option>右ヘミー原始反射</option><option>混合</option><option>未評価</option></select></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('modalEditGuest')">キャンセル</button>
+      <button class="btn btn-primary" onclick="saveEditGuest()">保存する</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Delete Confirm -->
+<div class="modal-overlay" id="modalDelete">
+  <div class="modal">
+    <h2 style="color:var(--red)">⚠ ゲスト削除の確認</h2>
+    <p style="font-size:13px;margin-bottom:12px">削除したゲストはゴミ箱に移動し、30日間は復元できます。</p>
+    <p style="font-size:13px;margin-bottom:8px">確認のため <strong>ゲスト名を正確に入力</strong> してください：</p>
+    <div class="form-group"><input id="deleteConfirmName" placeholder="ゲスト名を入力"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('modalDelete')">キャンセル</button>
+      <button class="btn btn-danger" onclick="confirmDelete()">ゴミ箱へ移動</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+// ITEM DATA (62種目: 既存46 + 大脳基底核・中脳3 + 原始反射13)
+// ══════════════════════════════════════════════════════
+const ITEMS=[
+  {r:"前頭葉",s:"前運動皮質",  n:"グーチョキパー",       d:"D4",mx:2,opts:[["良好",2],["右",1],["左",1],["両方",0],["評価不可",0]]},
+  {r:"前頭葉",s:"背外側前頭前野",n:"クイックタップ",      d:"D4",mx:2,opts:[["良好",2],["右",1],["左",1],["両方",0],["評価不可",0]]},
+  {r:"前頭葉",s:"前頭眼野",    n:"右サッケード",          d:"D4",mx:2,opts:[["良好",2],["オーバーシュート",1],["アンダーシュート",1],["評価不可",0]]},
+  {r:"前頭葉",s:"前頭眼野",    n:"左サッケード",          d:"D4",mx:2,opts:[["良好",2],["オーバーシュート",1],["アンダーシュート",1],["評価不可",0]]},
+  {r:"前頭葉",s:"前頭眼野",    n:"右パスート",            d:"D4",mx:2,opts:[["良好",2],["課題あり",1],["評価不可",0]]},
+  {r:"前頭葉",s:"前頭眼野",    n:"左パスート",            d:"D4",mx:2,opts:[["良好",2],["課題あり",1],["評価不可",0]]},
+  {r:"前頭葉",s:"前頭眼野",    n:"固定視",                d:"D4",mx:2,
+    multi:true,checks:["右上","右","右下","左下","左","左上","評価不可"]},
+  {r:"前頭葉",s:"前頭眼野",    n:"輻輳",                  d:"D4",mx:2,opts:[["良好",2],["右",1],["左",1],["両方",0],["評価不可",0]]},
+  {r:"前頭葉",s:"背外側前頭前野",n:"数字サッケード",      d:"D4",mx:2,opts:[["10秒以下",2],["11〜25秒",1],["26秒以上",0],["評価不可",0]]},
+  {r:"前頭葉",s:"背外側前頭前野",n:"ストループ",          d:"D4",mx:2,opts:[["10秒以下",2],["11〜25秒",1],["26秒以上",0],["評価不可",0]]},
+  {r:"前頭葉",s:"背外側前頭前野",n:"数字読み起こし",      d:"D4",mx:2,opts:[["8桁以上",2],["7桁（合格ライン）",1],["6桁",1],["5桁",1],["4桁以下",0],["評価不可",0]]},
+  {r:"前頭葉",s:"背外側前頭前野",n:"数字反対読み",        d:"D4",mx:2,opts:[["6桁以上",2],["5桁（合格ライン）",2],["4桁",1],["3桁以下",0],["評価不可",0]]},
+  {r:"前頭葉",s:"眼窩前頭皮質",n:"匂い当て（8回）",      d:"D4",mx:2,opts:[["8回",2],["7回",2],["6回",1],["5回",1],["4回以下",0],["評価不可",0]]},
+  {r:"前頭葉",s:"前頭眼野",    n:"アンチサッケード",      d:"D4",mx:2,opts:[["6（合格ライン）",2],["5",1],["4以下",0],["評価不可",0]]},
+  {r:"前頭葉",s:"背外側前頭前野",n:"No-Go",              d:"D4",mx:2,opts:[["7以上",2],["6（合格ライン）",1],["5以下",0],["評価不可",0]]},
+  {r:"小脳",  s:"前庭小脳",    n:"右VOR",                 d:"D5",mx:1,opts:[["良好",1],["課題あり",0],["評価不可",0]]},
+  {r:"小脳",  s:"前庭小脳",    n:"右上VOR",               d:"D5",mx:1,opts:[["良好",1],["課題あり",0],["評価不可",0]]},
+  {r:"小脳",  s:"前庭小脳",    n:"左下VOR",               d:"D5",mx:1,opts:[["良好",1],["課題あり",0],["評価不可",0]]},
+  {r:"小脳",  s:"前庭小脳",    n:"左VOR",                 d:"D5",mx:1,opts:[["良好",1],["課題あり",0],["評価不可",0]]},
+  {r:"小脳",  s:"前庭小脳",    n:"左上VOR",               d:"D5",mx:1,opts:[["良好",1],["課題あり",0],["評価不可",0]]},
+  {r:"小脳",  s:"前庭小脳",    n:"右下VOR",               d:"D5",mx:1,opts:[["良好",1],["課題あり",0],["評価不可",0]]},
+  {r:"小脳",  s:"前庭小脳",    n:"水平注視",              d:"D5",mx:2,opts:[["良好",2],["右",1],["左",1],["評価不可",0]]},
+  {r:"小脳",  s:"前庭小脳",    n:"傾き注視",              d:"D5",mx:2,opts:[["良好",2],["右",1],["左",1],["評価不可",0]]},
+  {r:"小脳",  s:"前庭小脳",    n:"傾きジャンプ注視",      d:"D5",mx:2,opts:[["良好",2],["右",1],["左",1],["評価不可",0]]},
+  {r:"小脳",  s:"脊髄小脳",    n:"ロンバーグ（タップ）",  d:"D5",mx:2,opts:[["良好",2],["右",1],["左",1],["評価不可",0]]},
+  {r:"小脳",  s:"脊髄小脳",    n:"タンデムウォーク",      d:"D5",mx:2,opts:[["良好",2],["右",1],["左",1],["評価不可",0]]},
+  {r:"小脳",  s:"脊髄小脳",    n:"片足立ち（閉眼）",      d:"D5",mx:2,opts:[["良好（15秒以上）",2],["右",1],["左",1],["評価不可",0]]},
+  {r:"小脳",  s:"脊髄小脳",    n:"フクダステップ",        d:"D5",mx:2,opts:[["良好（30°未満）",2],["右",1],["左",1],["評価不可",0]]},
+  {r:"小脳",  s:"大脳小脳",    n:"パタパタ",              d:"D5",mx:2,opts:[["良好",2],["右",1],["左",1],["両方",0],["評価不可",0]]},
+  {r:"小脳",  s:"大脳小脳",    n:"バイバイ",              d:"D5",mx:2,opts:[["良好",2],["右",1],["左",1],["両方",0],["評価不可",0]]},
+  {r:"小脳",  s:"大脳小脳",    n:"指鼻テスト",            d:"D5",mx:2,opts:[["良好",2],["右",1],["左",1],["両方",0],["評価不可",0]]},
+  {r:"頭頂葉",s:"体性感覚",    n:"ボディマッピング",      d:"D7",mx:2,opts:[["良好",2],["右",1],["左",1],["両方",0],["評価不可",0]]},
+  {r:"頭頂葉",s:"体性感覚",    n:"掌数字当て（5つ）",    d:"D7",mx:2,opts:[["良好（両方1個以下）",2],["右",1],["左",1],["両方",0],["評価不可",0]]},
+  {r:"側頭葉",s:"聴覚処理",    n:"音マッピング",          d:"D7",mx:2,opts:[["良好",2],["右",1],["左",1],["両方",0],["評価不可",0]]},
+  {r:"側頭葉",s:"聴覚処理",    n:"左右音テスト",          d:"D7",mx:2,opts:[["良好",2],["右",1],["左",1],["評価不可",0]]},
+  {r:"後頭葉",s:"斜視",        n:"カバーアンカバー（斜視）",d:"D6",mx:1,opts:[["良好",1],["右外斜視",0],["左外斜視",0],["右内斜視",0],["左内斜視",0],["評価不可",0]]},
+  {r:"後頭葉",s:"斜位",        n:"カバーアンカバー（斜位）",d:"D6",mx:1,opts:[["良好",1],["右外斜位",0],["左外斜位",0],["右内斜位",0],["左内斜位",0],["評価不可",0]]},
+  {r:"後頭葉",s:"両眼視",      n:"ブロックストリングス",  d:"D6",mx:1,opts:[["良好",1],["片目抑制",0],["評価不可",0]]},
+  {r:"後頭葉",s:"周辺視",      n:"周辺視テスト",          d:"D6",mx:2,opts:[["良好（100°以上）",2],["90〜99°",1],["90°以下",0],["評価不可",0]]},
+  {r:"島皮質",s:"内受容感覚",  n:"エアハンガードリル",    d:"D8",mx:2,opts:[["良好（25秒以上）",2],["15〜24秒",1],["15秒未満",0],["評価不可",0]]},
+  {r:"島皮質",s:"内受容感覚",  n:"心拍カウント",          d:"D8",mx:2,opts:[["良好（±2以下）",2],["±3〜5",1],["±6以上",0],["評価不可",0]]},
+  {r:"迷走神経",s:"自律神経末梢",n:"パルスオキシメーター",d:"D8",mx:2,opts:[["良好",2],["課題あり",0],["評価不可",0]]},
+  {r:"迷走神経",s:"自律神経末梢",n:"爪チェック",          d:"D8",mx:1,opts:[["良好",1],["右",0],["左",0],["両方",0],["評価不可",0]]},
+  {r:"迷走神経",s:"自律神経末梢",n:"軟口蓋",              d:"D8",mx:1,opts:[["良好",1],["右",0],["左",0],["両方",0],["評価不可",0]]},
+  {r:"迷走神経",s:"自律神経末梢",n:"僧帽筋",              d:"D8",mx:1,opts:[["良好",1],["右",0],["左",0],["両方",0],["評価不可",0]]},
+  {r:"迷走神経",s:"自律神経末梢",n:"心拍変動",            d:"D8",mx:2,opts:[["良好",2],["課題あり",0],["評価不可",0]]},
+  // ── 大脳基底核・中脳 ──
+  {r:"大脳基底核・中脳",s:"大脳基底核",n:"リズムテスト",              d:"D9",mx:2,opts:[["良好",2],["課題あり",1],["評価不可",0]]},
+  {r:"大脳基底核・中脳",s:"大脳基底核",n:"秒数合わせ",                d:"D9",mx:2,opts:[["良好（0.5秒未満）",2],["1秒未満",1],["1.5秒以上",0],["評価不可",0]]},
+  {r:"大脳基底核・中脳",s:"中脳",      n:"瞳孔反射",                  d:"D9",mx:2,opts:[["良好",2],["右",1],["左",1],["両方",0],["評価不可",0]]},
+  // ── 原始反射（選択肢: ない=2 / あまりない=1 / 少しある=1 / ある=0 / かなりある=0 / 評価不可=0）──
+  {r:"原始反射",s:"幹系",    n:"モロー反射",                          d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+  {r:"原始反射",s:"TLR",     n:"緊張性迷路反射（上向き）",            d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+  {r:"原始反射",s:"TLR",     n:"緊張性迷路反射（下向き）",            d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+  {r:"原始反射",s:"ATNR",    n:"非対称性緊張性頸反射（右）",          d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+  {r:"原始反射",s:"ATNR",    n:"非対称性緊張性頸反射（左）",          d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+  {r:"原始反射",s:"STNR",    n:"対称性緊張性頸反射（上）",            d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+  {r:"原始反射",s:"STNR",    n:"対称性緊張性頸反射（下）",            d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+  {r:"原始反射",s:"ガラント", n:"脊椎ガラント反射（右）",              d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+  {r:"原始反射",s:"ガラント", n:"脊椎ガラント反射（左）",              d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+  {r:"原始反射",s:"下肢",    n:"バビンスキー反射（右）",               d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+  {r:"原始反射",s:"下肢",    n:"バビンスキー反射（左）",               d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+  {r:"原始反射",s:"上肢",    n:"パーマー反射（右）",                   d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+  {r:"原始反射",s:"上肢",    n:"パーマー反射（左）",                   d:"D10",mx:2,opts:[["ない",2],["あまりない",1],["少しある",1],["ある",0],["かなりある",0],["評価不可",0]]},
+];
+
+// ドメインキー = 脳部位名（ITEMSの r フィールドと一致）
+const DOMAINS={
+  "前頭葉":         {name:"前頭葉",         alloc:10,color:"#5B9BD5",bg:"#DAEEF3"},
+  "小脳":           {name:"小脳",           alloc:10,color:"#70AD47",bg:"#E2EFDA"},
+  "頭頂葉":         {name:"頭頂葉",         alloc:3, color:"#FFC000",bg:"#FFF2CC"},
+  "側頭葉":         {name:"側頭葉",         alloc:3, color:"#ED7D31",bg:"#FCE4D6"},
+  "後頭葉":         {name:"後頭葉",         alloc:4, color:"#7030A0",bg:"#E2D9F3"},
+  "島皮質":         {name:"島皮質",         alloc:2, color:"#CC4444",bg:"#FFE6E6"},
+  "迷走神経":       {name:"迷走神経",       alloc:4, color:"#888888",bg:"#F2F2F2"},
+  "大脳基底核・中脳":{name:"大脳基底核・中脳",alloc:4,color:"#00897B",bg:"#E0F2F1"},
+  "原始反射":       {name:"原始反射",       alloc:10,color:"#AD1457",bg:"#FCE4EC"},
+};
+// 合計: 10+10+3+3+4+2+4+4+10 = 50点
+
+// ══════════════════════════════════════════════════════
+// FIREBASE CONFIG
+// ここにご自身の Firebase プロジェクトの設定値を貼り付けてください。
+// console.firebase.google.com → プロジェクト → ⚙ 設定 → マイアプリ → SDK の設定と構成
+// ══════════════════════════════════════════════════════
+const FB_CONFIG = {
+  apiKey:            "YOUR_API_KEY",
+  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId:         "YOUR_PROJECT_ID",
+  storageBucket:     "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId:             "YOUR_APP_ID"
+};
+/** Firestore 未設定のときは null（ローカルのみ動作） */
+let db = null;
+(function initFirebase(){
+  const ok = FB_CONFIG.apiKey && FB_CONFIG.apiKey !== "YOUR_API_KEY" &&
+    FB_CONFIG.projectId && FB_CONFIG.projectId !== "YOUR_PROJECT_ID";
+  if(!ok) return;
+  try{
+    firebase.initializeApp(FB_CONFIG);
+    db = firebase.firestore();
+  }catch(e){
+    console.warn("Firebase init failed", e);
+  }
+})();
+
+// ══════════════════════════════════════════════════════
+// STORAGE（ローカル + Firestore 二重保存）
+// ══════════════════════════════════════════════════════
+const STORE_KEY="noic_assess_v3";
+
+/* --- ローカル読み書き --- */
+function loadStore(){
+  try{const d=localStorage.getItem(STORE_KEY);return d?JSON.parse(d):{guests:{},trash:[],settings:{}}}
+  catch(e){return{guests:{},trash:[],settings:{}}}
+}
+function localSaveStore(st){
+  try{
+    localStorage.setItem(STORE_KEY,JSON.stringify(st));
+    localStorage.setItem(STORE_KEY+"_bak",JSON.stringify(st));
+    const h=new Date().getHours().toString().padStart(2,"0");
+    const m=new Date().getMinutes().toString().padStart(2,"0");
+    document.getElementById("saveBadge").textContent="✓ "+h+":"+m+" 保存";
+  }catch(e){showToast("⚠ 保存エラー")}
+}
+
+/* --- Firestore 読み書き --- */
+async function saveGuestToCloud(gid,guest){
+  if(!db) return;
+  try{await db.collection("guests").doc(gid).set(guest);}
+  catch(e){console.warn("cloud save error",e);}
+}
+async function deleteGuestFromCloud(gid){
+  if(!db) return;
+  try{await db.collection("guests").doc(gid).delete();}
+  catch(e){console.warn("cloud delete error",e);}
+}
+async function saveTrashToCloud(trash){
+  if(!db) return;
+  try{await db.collection("config").doc("trash").set({items:trash});}
+  catch(e){console.warn("cloud trash error",e);}
+}
+async function loadFromCloud(){
+  if(!db) return{guests:{},trash:[],settings:{}};
+  const[gSnap,tSnap]=await Promise.all([
+    db.collection("guests").get(),
+    db.collection("config").doc("trash").get()
+  ]);
+  const guests={};
+  gSnap.forEach(d=>{guests[d.id]=d.data();});
+  const trash=tSnap.exists?(tSnap.data().items||[]):[];
+  return{guests,trash,settings:{}};
+}
+let _syncUnsub=null;
+function startRealtimeSync(){
+  if(!db) return;
+  if(_syncUnsub)_syncUnsub();
+  _syncUnsub=db.collection("guests").onSnapshot(snap=>{
+    snap.docChanges().forEach(ch=>{
+      if(ch.type==="added"||ch.type==="modified"){store.guests[ch.doc.id]=ch.doc.data();}
+      else if(ch.type==="removed"){delete store.guests[ch.doc.id];}
+    });
+    localSaveStore(store);
+    renderGuestList();
+    if(currentGid&&store.guests[currentGid])renderResults(currentGid);
+  });
+}
+
+/* --- 統合 saveStore（ローカル + クラウド） --- */
+function saveStore(st){
+  localSaveStore(st);
+  // 各ゲストをクラウドへ
+  for(const[gid,guest]of Object.entries(st.guests||{})){
+    saveGuestToCloud(gid,guest);
+  }
+  // ゴミ箱をクラウドへ
+  saveTrashToCloud(st.trash||[]);
+}
+// データマイグレーション: mx変更後に片側score:0を正しいscore:1へ自動修正
+function migrateStore(st){
+  // mx:1→2 に変更した5項目（片側"右"or"左" → score:0 だったものを score:1 へ）
+  const fixItems=["グーチョキパー","クイックタップ","パタパタ","バイバイ","指鼻テスト"];
+  const sideVals=new Set(["右","左"]);
+  let changed=false;
+  for(const g of Object.values(st.guests||{})){
+    for(const a of Object.values(g.assessments||{})){
+      for(const name of fixItems){
+        const sv=a.items?.[name];
+        if(sv&&sideVals.has(sv.result)&&sv.score===0){sv.score=1;changed=true;}
+      }
+    }
+  }
+  if(changed)saveStore(st);
+  return st;
+}
+// cloud版: 起動時は空で初期化し、initApp()でlocalStorage/Firestoreから上書き
+let store={guests:{},trash:[],settings:{}};
+
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
+function nowIso(){return new Date().toISOString()}
+function fmtDate(d){if(!d)return"—";const p=d.split("T")[0].split("-");return p[0]+"/"+p[1]+"/"+p[2]}
+function esc(s){return(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+
+let currentGid=null;
+let radarChart=null;
+
+// ══════════════════════════════════════════════════════
+// NAV
+// ══════════════════════════════════════════════════════
+function showPage(id,btn){
+  document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+  document.querySelectorAll(".nav-btn").forEach(b=>b.classList.remove("active"));
+  if(btn)btn.classList.add("active");
+  document.getElementById("scoreBar").classList.toggle("active",id==="pageAssess"&&!!currentGid);
+  if(id==="pageGuests")renderGuestList();
+  if(id==="pageResults")renderResults();
+  if(id==="pageData")renderTrash();
+}
+function showToast(msg){
+  const t=document.getElementById("toast");
+  t.textContent=msg;t.classList.add("show");
+  clearTimeout(t._tmr);t._tmr=setTimeout(()=>t.classList.remove("show"),2600);
+}
+function closeModal(id){document.getElementById(id).classList.remove("active")}
+
+// ══════════════════════════════════════════════════════
+// GUEST LIST
+// ══════════════════════════════════════════════════════
+function renderGuestList(){
+  const el=document.getElementById("guestList");
+  const ids=Object.keys(store.guests).sort((a,b)=>(store.guests[b].updatedAt||"").localeCompare(store.guests[a].updatedAt||""));
+  if(!ids.length){
+    el.innerHTML='<div class="empty"><p style="font-size:14px">まだゲストが登録されていません</p><br><button class="btn btn-primary btn-sm" onclick="openNewGuestModal()">＋ 最初のゲストを登録</button></div>';
+    return;
+  }
+  el.innerHTML=ids.map(id=>{
+    const g=store.guests[id];
+    const sc=getLatestScore(g);
+    const initial=(g.name||"?").replace(/\s/g,"")[0]||"?";
+    const dateCount=Object.keys(g.assessments||{}).length;
+    return`<div>
+      <div class="guest-row" onclick="selectGuest('${id}')">
+        <div class="avatar" style="width:38px;height:38px;font-size:15px">${esc(initial)}</div>
+        <div class="info">
+          <div class="gname">${esc(g.name)}</div>
+          <div class="gmeta">${esc(g.age||"")} ${esc(g.gender||"")}${g.status?" | "+esc(g.status):""} | 測定${dateCount}回 | ${fmtDate(g.updatedAt)}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="gscore">${sc!==null?sc:"—"}</div>
+          <div style="font-size:9px;color:var(--sub)">/ 50pt</div>
+        </div>
+      </div>
+      <div class="guest-edit-row">
+        <button class="btn btn-outline btn-sm" style="flex:1" onclick="event.stopPropagation();selectGuest('${id}')">▶ 入力・閲覧</button>
+        <button class="edit-btn" style="flex:1" onclick="event.stopPropagation();openEditGuestModalById('${id}')">✏ 基本情報を編集</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function getLatestScore(g){
+  const dates=Object.keys(g.assessments||{}).sort().reverse();
+  if(!dates.length)return null;
+  const a=g.assessments[dates[0]];
+  return a.totalScore!=null?Math.floor(a.totalScore):null;
+}
+
+function openNewGuestModal(){
+  ["newName","newAge","newStatus","newDiag"].forEach(id=>document.getElementById(id).value="");
+  document.getElementById("newGender").value="";
+  document.getElementById("newBalance").value="";
+  document.getElementById("modalNewGuest").classList.add("active");
+  setTimeout(()=>document.getElementById("newName").focus(),100);
+}
+
+// ── Edit guest ──
+let editTargetId=null;
+function openEditGuestModal(){
+  // アセスメント画面から呼ばれる（currentGid を使用）
+  openEditGuestModalById(currentGid);
+}
+function openEditGuestModalById(id){
+  const g=store.guests[id];if(!g)return;
+  editTargetId=id;
+  document.getElementById("editName").value=g.name||"";
+  document.getElementById("editGender").value=g.gender||"";
+  document.getElementById("editAge").value=g.age||"";
+  document.getElementById("editStatus").value=g.status||"";
+  document.getElementById("editDiag").value=g.diagnosis||"";
+  document.getElementById("editBalance").value=g.brainBalance||"";
+  document.getElementById("modalEditGuest").classList.add("active");
+  setTimeout(()=>document.getElementById("editName").focus(),100);
+}
+function saveEditGuest(){
+  const g=store.guests[editTargetId];if(!g)return;
+  const name=document.getElementById("editName").value.trim();
+  if(!name){showToast("名前を入力してください");return}
+  g.name=name;
+  g.gender=document.getElementById("editGender").value;
+  g.age=document.getElementById("editAge").value.trim();
+  g.status=document.getElementById("editStatus").value.trim();
+  g.diagnosis=document.getElementById("editDiag").value.trim();
+  g.brainBalance=document.getElementById("editBalance").value;
+  g.updatedAt=nowIso();
+  saveStore(store);
+  closeModal("modalEditGuest");
+  showToast("✓ "+name+" の情報を更新しました");
+  // アセスメントページが表示中なら情報バーを更新
+  if(editTargetId===currentGid)renderAssessment();
+  renderGuestList();
+}
+
+function createGuest(){
+  const name=document.getElementById("newName").value.trim();
+  if(!name){showToast("名前を入力してください");return}
+  const id=uid();
+  store.guests[id]={
+    id,name,
+    gender:document.getElementById("newGender").value,
+    age:document.getElementById("newAge").value.trim(),
+    status:document.getElementById("newStatus").value.trim(),
+    diagnosis:document.getElementById("newDiag").value.trim(),
+    brainBalance:document.getElementById("newBalance").value,
+    createdAt:nowIso(),updatedAt:nowIso(),
+    assessments:{}
+  };
+  saveStore(store);
+  closeModal("modalNewGuest");
+  showToast("✓ "+name+" を登録しました");
+  selectGuest(id);
+}
+
+function selectGuest(id){
+  currentGid=id;
+  renderAssessment();
+  showPage("pageAssess",document.querySelectorAll(".nav-btn")[1]);
+}
+
+// ══════════════════════════════════════════════════════
+// ASSESSMENT
+// ══════════════════════════════════════════════════════
+function renderAssessment(){
+  if(!currentGid||!store.guests[currentGid])return;
+  const g=store.guests[currentGid];
+  const initial=(g.name||"?").replace(/\s/g,"")[0]||"?";
+
+  // Guest info bar (直接DOM更新 → overlayしない)
+  document.getElementById("assessAvatar").textContent=initial;
+  document.getElementById("assessName").textContent=g.name;
+  document.getElementById("assessMeta").textContent=
+    [g.age,g.gender,g.diagnosis].filter(Boolean).join(" | ")||"—";
+
+  // Date
+  const today=new Date().toISOString().split("T")[0];
+  const dateInput=document.getElementById("assessDate");
+  const dates=Object.keys(g.assessments||{}).sort().reverse();
+  if(!dateInput.value)dateInput.value=dates[0]||today;
+
+  buildItems(g,dateInput.value);
+  dateInput.onchange=()=>buildItems(g,dateInput.value);
+  updateProgress();
+  updateScoreBar();
+}
+
+function getAssessment(g,date){
+  if(!g.assessments)g.assessments={};
+  if(!g.assessments[date])g.assessments[date]={date,items:{},memos:{},savedAt:nowIso(),totalScore:null};
+  if(!g.assessments[date].memos)g.assessments[date].memos={};
+  return g.assessments[date];
+}
+
+function buildItems(g,date){
+  const container=document.getElementById("assessItems");
+  container.innerHTML="";
+  const assessment=getAssessment(g,date);
+  let currentRegion="";
+
+  ITEMS.forEach((item,idx)=>{
+    if(item.r!==currentRegion){
+      currentRegion=item.r;
+      const rItems=ITEMS.filter(i=>i.r===currentRegion);
+      const filled=rItems.filter(i=>assessment.items[i.n]?.result!==undefined).length;
+      const card=document.createElement("div");
+      card.className=`card region-${currentRegion}`;
+      card.innerHTML=`<div class="card-header" onclick="toggleCard(this)">
+        <span class="arrow">▶</span>${currentRegion}
+        <span style="font-size:11px;color:var(--sub);margin-left:auto" id="rcnt-${currentRegion}">${filled}/${rItems.length}</span>
+      </div><div class="card-body" data-region="${currentRegion}"></div>`;
+      container.appendChild(card);
+    }
+
+    const body=container.querySelector(`[data-region="${currentRegion}"]`);
+    const saved=assessment.items[item.n]||{};
+    const memo=assessment.memos[item.n]||"";
+    const sc=saved.score;
+    const scClass=sc!=null?"s"+Math.min(sc,2):"";
+
+    const div=document.createElement("div");
+    div.className="item";
+
+    let optsHtml;
+    if(item.multi){
+      // 複数チェック式（固定視等）
+      const checkedArr=saved.checked||[];
+      optsHtml=`<div class="multi-hint">エラー方向をすべて選択（0〜1個→2点 / 2〜3個→1点 / 4個以上→0点 / 評価不可→0点）</div>
+        <div class="multi-checks">${item.checks.map(val=>{
+          const isChecked=checkedArr.includes(val);
+          const isFuka=val==="評価不可";
+          const cls=isChecked?(isFuka?"mc-fuka":"mc-checked"):"";
+          return`<label class="${cls}"><input type="checkbox" value="${esc(val)}" data-idx="${idx}" onchange="pickMulti(this)"${isChecked?" checked":""}>${esc(val)}</label>`;
+        }).join("")}</div>`;
+    }else{
+      optsHtml=`<div class="opts">${item.opts.map(([label,s])=>{
+        const sel=saved.result===label?"selected":"";
+        const sc2=s>=2?"s2":s>=1?"s1":"s0";
+        return`<div class="opt ${sc2} ${sel}" data-idx="${idx}" data-label="${esc(label)}" data-score="${s}" onclick="pickOpt(this)">${esc(label)}</div>`;
+      }).join("")}</div>`;
+    }
+
+    div.innerHTML=`
+      <div class="item-name">
+        <span style="font-size:13px;font-weight:600">${item.n}</span>
+        <span class="score-badge ${scClass}" id="badge-${idx}">${sc!=null?sc:"—"}</span>
+        <span style="font-size:10px;color:var(--sub)">${item.s}</span>
+      </div>
+      ${optsHtml}
+      <span class="memo-label">📝 メモ</span>
+      <textarea class="memo-input" rows="1" placeholder="気づき・数値・状況などを記入（任意）" data-idx="${idx}" oninput="saveMemo(this)">${esc(memo)}</textarea>`;
+    body.appendChild(div);
+  });
+}
+
+function toggleCard(hdr){
+  hdr.classList.toggle("open");
+  hdr.nextElementSibling.classList.toggle("open");
+}
+function expandAll(){
+  document.querySelectorAll("#assessItems .card-header").forEach(h=>{
+    h.classList.add("open");h.nextElementSibling.classList.add("open");
+  });
+}
+function collapseAll(){
+  document.querySelectorAll("#assessItems .card-header").forEach(h=>{
+    h.classList.remove("open");h.nextElementSibling.classList.remove("open");
+  });
+}
+
+function pickOpt(el){
+  const idx=parseInt(el.dataset.idx);
+  const label=el.dataset.label;
+  const score=parseInt(el.dataset.score);
+  const item=ITEMS[idx];
+
+  el.parentElement.querySelectorAll(".opt").forEach(o=>o.classList.remove("selected"));
+  el.classList.add("selected");
+
+  const badge=document.getElementById("badge-"+idx);
+  badge.textContent=score;
+  badge.className="score-badge s"+Math.min(score,2);
+
+  const g=store.guests[currentGid];
+  const date=document.getElementById("assessDate").value;
+  const a=getAssessment(g,date);
+  a.items[item.n]={result:label,score};
+  a.savedAt=nowIso();
+  g.updatedAt=nowIso();
+  calcScores(a);
+  saveStore(store);
+  updateProgress();
+  updateScoreBar();
+  updateRegionCount(item.r);
+}
+
+// 固定視スコア計算（mx:2）: エラー0〜1→2, 2〜3→1, 4以上or評価不可→0
+function calcMultiScore(checked){
+  if(!checked||!checked.length)return null;
+  if(checked.includes("評価不可"))return 0;
+  const n=checked.length;
+  if(n<=1)return 2;
+  if(n<=3)return 1;
+  return 0;
+}
+function pickMulti(el){
+  const idx=parseInt(el.dataset.idx);
+  const item=ITEMS[idx];
+  const container=el.closest(".multi-checks");
+  const allCbs=container.querySelectorAll("input[type='checkbox']");
+
+  // 評価不可チェック時は他を解除、他チェック時は評価不可を解除
+  if(el.value==="評価不可"&&el.checked){
+    allCbs.forEach(cb=>{if(cb.value!=="評価不可")cb.checked=false;});
+  }else if(el.value!=="評価不可"&&el.checked){
+    const fuka=container.querySelector("input[value='評価不可']");
+    if(fuka)fuka.checked=false;
+  }
+
+  // ラベルのスタイル更新
+  allCbs.forEach(cb=>{
+    const lbl=cb.parentElement;
+    const isFuka=cb.value==="評価不可";
+    lbl.className=cb.checked?(isFuka?"mc-fuka":"mc-checked"):"";
+  });
+
+  const checked=Array.from(allCbs).filter(cb=>cb.checked).map(cb=>cb.value);
+  const score=calcMultiScore(checked);
+  const result=checked.join(", ");
+
+  const badge=document.getElementById("badge-"+idx);
+  badge.textContent=score!=null?score:"—";
+  badge.className="score-badge"+(score!=null?" s"+Math.min(score,2):"");
+
+  const g=store.guests[currentGid];
+  const date=document.getElementById("assessDate").value;
+  const a=getAssessment(g,date);
+  if(checked.length===0){delete a.items[item.n];}
+  else{a.items[item.n]={result,checked,score};}
+  a.savedAt=nowIso();
+  g.updatedAt=nowIso();
+  calcScores(a);
+  saveStore(store);
+  updateProgress();
+  updateScoreBar();
+  updateRegionCount(item.r);
+}
+
+function saveMemo(el){
+  const idx=parseInt(el.dataset.idx);
+  const item=ITEMS[idx];
+  const g=store.guests[currentGid];if(!g)return;
+  const date=document.getElementById("assessDate").value;
+  const a=getAssessment(g,date);
+  a.memos[item.n]=el.value;
+  g.updatedAt=nowIso();
+  saveStore(store);
+}
+
+function calcScores(a){
+  const ds={};
+  for(const[dk,dv]of Object.entries(DOMAINS)){
+    const dItems=ITEMS.filter(i=>i.r===dk);
+    let raw=0,mx=0;
+    dItems.forEach(it=>{
+      const sv=a.items[it.n];
+      if(sv&&sv.score!=null)raw+=sv.score;
+      mx+=it.mx;
+    });
+    ds[dk]={raw,max:mx,points:mx>0?Math.round(raw/mx*dv.alloc*10)/10:0};
+  }
+  a.scores=ds;
+  a.totalScore=Math.floor(Object.values(ds).reduce((s,d)=>s+d.points,0));
+}
+
+function updateProgress(){
+  const g=store.guests[currentGid];if(!g)return;
+  const date=document.getElementById("assessDate").value;
+  const a=getAssessment(g,date);
+  const n=Object.keys(a.items).length;
+  const pct=Math.round(n/62*100);
+  document.getElementById("progressFill").style.width=pct+"%";
+  document.getElementById("progressText").textContent=n+" / 62 入力済み（"+pct+"%）";
+}
+
+function updateRegionCount(region){
+  const g=store.guests[currentGid];if(!g)return;
+  const date=document.getElementById("assessDate").value;
+  const a=getAssessment(g,date);
+  const rItems=ITEMS.filter(i=>i.r===region);
+  const filled=rItems.filter(i=>a.items[i.n]?.result!==undefined).length;
+  const el=document.getElementById("rcnt-"+region);
+  if(el)el.textContent=filled+"/"+rItems.length;
+}
+
+function updateScoreBar(){
+  const g=store.guests[currentGid];if(!g)return;
+  const date=document.getElementById("assessDate").value;
+  const a=getAssessment(g,date);
+  calcScores(a);
+  document.getElementById("domainScores").innerHTML=
+    Object.entries(DOMAINS).map(([dk,dv])=>{
+      const pts=a.scores?.[dk]?.points||0;
+      return`<div class="domain-pill" style="border-left:3px solid ${dv.color}">${dv.name} <strong>${pts}</strong>/${dv.alloc}</div>`;
+    }).join("");
+  document.getElementById("totalScore").textContent=a.totalScore!=null?a.totalScore:"—";
+  document.getElementById("scoreBar").classList.add("active");
+}
+
+// ══════════════════════════════════════════════════════
+// RESULTS
+// ══════════════════════════════════════════════════════
+function renderResults(){
+  const el=document.getElementById("resultsContent");
+  if(!currentGid||!store.guests[currentGid]){
+    el.innerHTML='<div class="empty"><p>ゲスト一覧からゲストを選択してください</p></div>';return;
+  }
+  const g=store.guests[currentGid];
+  const dates=Object.keys(g.assessments||{}).sort().reverse();
+  if(!dates.length){el.innerHTML='<div class="empty"><p>アセスメントデータがありません</p></div>';return}
+  const date=dates[0];
+  const a=g.assessments[date];
+  calcScores(a);
+
+  const initial=(g.name||"?").replace(/\s/g,"")[0]||"?";
+  let html=`<div class="card" style="padding:16px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <div class="avatar">${esc(initial)}</div>
+      <div><strong style="font-size:15px">${esc(g.name)}</strong>
+        <div style="font-size:11px;color:var(--sub)">${esc(g.age||"")} ${esc(g.gender||"")} | 測定日: ${date}</div>
+      </div>
+    </div>
+    <div style="text-align:center;padding:16px 0;background:var(--accent-light);border-radius:10px">
+      <div style="font-size:11px;color:var(--sub);margin-bottom:4px">脳アセスメントスコア（9領域）</div>
+      <div style="font-size:52px;font-weight:700;color:var(--accent);line-height:1">${a.totalScore!=null?a.totalScore:"—"}</div>
+      <div style="font-size:14px;color:var(--sub)">/ 50 点</div>
+    </div>
+  </div>`;
+
+  html+=`<div class="card"><div class="card-header open" style="background:var(--accent-light);cursor:default">ドメイン別スコア</div>
+    <div class="card-body open" style="display:block;padding-top:14px">`;
+  for(const[dk,dv]of Object.entries(DOMAINS)){
+    const s=a.scores?.[dk]||{raw:0,max:0,points:0};
+    const pct=s.max>0?Math.round(s.raw/s.max*100):0;
+    html+=`<div class="domain-row">
+      <div class="dr-top">
+        <span style="font-weight:600;font-size:13px">${dv.name}</span>
+        <span style="font-size:13px"><strong>${s.points}</strong> / ${dv.alloc}点　<span style="color:var(--sub);font-size:11px">${pct}%</span></span>
+      </div>
+      <div class="dr-bar"><div class="dr-fill" style="width:${pct}%;background:${dv.color}"></div></div>
+    </div>`;
+  }
+  html+=`</div></div>`;
+
+  html+=`<div class="card"><div class="card-header open" style="background:var(--accent-light);cursor:default">レーダーチャート</div>
+    <div class="card-body open" style="display:block"><div class="chart-wrap"><canvas id="radarCanvas"></canvas></div></div></div>`;
+
+  const hasMemos=ITEMS.some(it=>a.memos?.[it.n]);
+  if(hasMemos){
+    html+=`<div class="card"><div class="card-header open" style="background:#FFF9E6;cursor:default">📝 メモ一覧</div>
+      <div class="card-body open" style="display:block;padding-top:10px">`;
+    ITEMS.forEach(it=>{
+      const memo=a.memos?.[it.n];
+      if(memo)html+=`<div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #F0F0F0">
+        <span style="font-size:12px;font-weight:600">${esc(it.n)}</span><span style="font-size:10px;color:var(--sub);margin-left:6px">${esc(it.s)}</span>
+        <div style="font-size:12px;color:var(--text);margin-top:2px;white-space:pre-line">${esc(memo)}</div>
+      </div>`;
+    });
+    html+=`</div></div>`;
+  }
+
+  html+=`<div style="display:flex;gap:8px;margin-top:4px">
+    <button class="btn btn-primary btn-block" onclick="exportCurrentExcel()">📊 Excel出力</button>
+    <button class="btn btn-outline btn-block" style="border-color:#2E7D32;color:#2E7D32" onclick="exportAssessmentMD()">📝 MD出力</button>
+    <button class="btn btn-outline btn-block" onclick="showPage('pageData',document.querySelectorAll('.nav-btn')[3])">✉ メール送信</button>
+  </div>`;
+
+  el.innerHTML=html;
+
+  // Radar
+  setTimeout(()=>{
+    const canvas=document.getElementById("radarCanvas");if(!canvas)return;
+    if(radarChart)radarChart.destroy();
+    const radarLabels={
+      "前頭葉":"前頭葉","小脳":"小脳","頭頂葉":"頭頂葉","側頭葉":"側頭葉",
+      "後頭葉":"後頭葉","島皮質":"島皮質","迷走神経":"迷走神経",
+      "大脳基底核・中脳":"基底核\n中脳","原始反射":"原始反射"
+    };
+    radarChart=new Chart(canvas,{type:"radar",data:{
+      labels:Object.keys(DOMAINS).map(k=>radarLabels[k]||k),
+      datasets:[{label:"達成率 %",
+        data:Object.entries(DOMAINS).map(([dk,dv])=>{
+          const s=a.scores?.[dk]||{points:0};
+          return dv.alloc>0?Math.round(s.points/dv.alloc*100):0;
+        }),
+        backgroundColor:"rgba(192,92,0,0.12)",borderColor:"rgba(192,92,0,0.8)",
+        borderWidth:2,pointBackgroundColor:"rgba(192,92,0,1)",pointRadius:4
+      }]
+    },options:{scales:{r:{min:0,max:100,ticks:{stepSize:25,font:{size:9}},
+      pointLabels:{font:{size:10}}}},plugins:{legend:{display:false}},responsive:true}});
+  },100);
+}
+
+// ══════════════════════════════════════════════════════
+// DELETE & TRASH
+// ══════════════════════════════════════════════════════
+let deleteTargetId=null;
+function openDeleteModal(){
+  deleteTargetId=currentGid;
+  document.getElementById("deleteConfirmName").value="";
+  document.getElementById("modalDelete").classList.add("active");
+}
+function confirmDelete(){
+  const g=store.guests[deleteTargetId];if(!g)return;
+  const input=document.getElementById("deleteConfirmName").value.trim();
+  if(input!==g.name){showToast("⚠ 名前が一致しません");return}
+  g.deletedAt=nowIso();
+  store.trash.push(g);
+  delete store.guests[deleteTargetId];
+  deleteGuestFromCloud(deleteTargetId); // Firestoreからも削除
+  saveStore(store);
+  closeModal("modalDelete");
+  currentGid=null;
+  document.getElementById("assessGuestInfo").style.display="none";
+  showPage("pageGuests",document.querySelectorAll(".nav-btn")[0]);
+  showToast("🗑 "+g.name+" をゴミ箱に移動しました");
+}
+function renderTrash(){
+  const el=document.getElementById("trashList");
+  const cutoff=new Date(Date.now()-30*864e5).toISOString();
+  store.trash=store.trash.filter(g=>g.deletedAt>cutoff);
+  saveStore(store);
+  if(!store.trash.length){
+    el.innerHTML='<p style="font-size:12px;color:var(--sub)">ゴミ箱は空です。</p>';return;
+  }
+  el.innerHTML=store.trash.map((g,i)=>
+    `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #F0F0F0">
+      <span style="flex:1;font-size:13px">${esc(g.name)} <span style="font-size:10px;color:var(--sub)">(削除: ${fmtDate(g.deletedAt)})</span></span>
+      <button class="btn btn-outline btn-sm" onclick="restoreGuest(${i})">復元</button>
+    </div>`
+  ).join("");
+}
+function restoreGuest(idx){
+  const g=store.trash[idx];if(!g)return;
+  delete g.deletedAt;
+  store.guests[g.id]=g;
+  store.trash.splice(idx,1);
+  saveStore(store);renderTrash();
+  showToast("✓ "+g.name+" を復元しました");
+}
+
+// ══════════════════════════════════════════════════════
+// EXCEL EXPORT（見やすく整形）
+// ══════════════════════════════════════════════════════
+function exportCurrentExcel(){
+  if(!currentGid){showToast("ゲストを選択してください");return}
+  const g=store.guests[currentGid];
+  const dates=Object.keys(g.assessments||{}).sort().reverse();
+  if(!dates.length){showToast("データがありません");return}
+  const date=dates[0];
+  const a=g.assessments[date];
+  calcScores(a);
+
+  const wb=XLSX.utils.book_new();
+
+  // ── Sheet 1: サマリー ──
+  const sumRows=[
+    ["NOIC 脳アセスメント 結果サマリー"],
+    [],
+    ["名前",g.name,"性別",g.gender,"年齢",g.age],
+    ["ステータス",g.status,"診断名",g.diagnosis,"脳バランス",g.brainBalance],
+    ["測定日",date,"出力日",new Date().toLocaleDateString("ja-JP")],
+    [],
+    ["■ 脳アセスメントスコア（D4-D8）"],
+    ["ドメイン","素点","満点","配点(pt)","獲得点","達成率"],
+  ];
+  for(const[dk,dv]of Object.entries(DOMAINS)){
+    const s=a.scores?.[dk]||{raw:0,max:0,points:0};
+    const pct=s.max>0?Math.round(s.raw/s.max*100):0;
+    sumRows.push([dk+" "+dv.name, s.raw, s.max, dv.alloc, s.points, pct+"%"]);
+  }
+  sumRows.push(["合計","","",50,a.totalScore,"—"]);
+  sumRows.push([]);
+  sumRows.push(["■ 脳スコアはNOIC独自の指標であり、医学的診断を示すものではありません。"]);
+
+  const wsSummary=XLSX.utils.aoa_to_sheet(sumRows);
+  wsSummary["!cols"]=[{wch:28},{wch:12},{wch:8},{wch:10},{wch:10},{wch:8}];
+  XLSX.utils.book_append_sheet(wb,wsSummary,"サマリー");
+
+  // ── Sheet 2: 詳細結果 ──
+  const detRows=[
+    ["NOIC 脳アセスメント 詳細結果"],
+    ["ゲスト: "+g.name+" | 測定日: "+date],
+    [],
+    ["#","ドメイン","脳領域","サブカテゴリ","種目","判定結果","スコア","最大","メモ"],
+  ];
+  ITEMS.forEach((item,i)=>{
+    const sv=a.items[item.n]||{};
+    const memo=a.memos?.[item.n]||"";
+    detRows.push([
+      i+1, item.d, item.r, item.s, item.n,
+      sv.result||"未入力", sv.score!=null?sv.score:"", item.mx, memo
+    ]);
+  });
+
+  const wsDetail=XLSX.utils.aoa_to_sheet(detRows);
+  wsDetail["!cols"]=[{wch:4},{wch:8},{wch:8},{wch:14},{wch:22},{wch:20},{wch:6},{wch:6},{wch:30}];
+  XLSX.utils.book_append_sheet(wb,wsDetail,"詳細結果");
+
+  // ── Sheet 3: メモ一覧 ──
+  const memoRows=[["種目","脳領域","サブカテゴリ","メモ内容"]];
+  ITEMS.forEach(it=>{
+    const memo=a.memos?.[it.n];
+    if(memo)memoRows.push([it.n,it.r,it.s,memo]);
+  });
+  if(memoRows.length>1){
+    const wsMemo=XLSX.utils.aoa_to_sheet(memoRows);
+    wsMemo["!cols"]=[{wch:22},{wch:10},{wch:16},{wch:50}];
+    XLSX.utils.book_append_sheet(wb,wsMemo,"メモ一覧");
+  }
+
+  const fn=`NOIC_${g.name.replace(/\s/g,"_")}_${date}.xlsx`;
+  XLSX.writeFile(wb,fn);
+  store.settings.lastExport=nowIso();
+  saveStore(store);
+  showToast("📊 "+fn+" をダウンロードしました");
+}
+
+// ══════════════════════════════════════════════════════
+// EMAIL
+// ══════════════════════════════════════════════════════
+function emailExcel(){
+  const email=document.getElementById("emailTo")?.value?.trim()||"";
+  exportCurrentExcel();
+  const g=store.guests[currentGid];
+  const subject=encodeURIComponent("NOIC 脳アセスメント: "+(g?.name||""));
+  const body=encodeURIComponent("脳アセスメント結果を添付します。\n\nダウンロードされたExcelファイルをこのメールに添付して送信してください。");
+  setTimeout(()=>window.location.href=`mailto:${email}?subject=${subject}&body=${body}`,400);
+  showToast("✉ メールアプリを開きます。ExcelをExcel附付してください");
+}
+
+// ══════════════════════════════════════════════════════
+// BACKUP / RESTORE
+// ══════════════════════════════════════════════════════
+function exportAllJSON(){
+  const blob=new Blob([JSON.stringify(store,null,2)],{type:"application/json"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download="NOIC_backup_"+new Date().toISOString().split("T")[0]+".json";
+  a.click();URL.revokeObjectURL(url);
+  store.settings.lastExport=nowIso();saveStore(store);
+  showToast("💾 バックアップを保存しました");
+}
+function importJSON(event){
+  const file=event.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      const data=JSON.parse(e.target.result);
+      if(!data.guests){showToast("⚠ 無効なバックアップファイル");return}
+      let imported=0;
+      for(const[id,g]of Object.entries(data.guests)){
+        if(!store.guests[id]){store.guests[id]=g;imported++}
+        else{
+          for(const[date,a]of Object.entries(g.assessments||{})){
+            if(!store.guests[id].assessments[date])store.guests[id].assessments[date]=a;
+          }
+          imported++;
+        }
+      }
+      saveStore(store);renderGuestList();
+      showToast("✓ "+imported+"件を復元しました");
+    }catch(err){showToast("⚠ 読み込みエラー")}
+  };
+  reader.readAsText(file);
+  event.target.value="";
+}
+
+// ══════════════════════════════════════════════════════
+// MARKDOWN EXPORT（レポート用 脳アセスメント.md）
+// ══════════════════════════════════════════════════════
+function generateMarkdown(g,a){
+  const L=[];
+  L.push("# NOIC 脳アセスメント結果\n");
+  L.push("## 基本情報\n");
+  L.push("| 項目 | 内容 |");
+  L.push("|------|------|");
+  L.push(`| 名前 | ${g.name} |`);
+  L.push(`| 性別 | ${g.gender||"—"} |`);
+  L.push(`| 年齢 | ${g.age||"—"} |`);
+  L.push(`| ステータス | ${g.status||"—"} |`);
+  L.push(`| 診断名 | ${g.diagnosis||"—"} |`);
+  L.push(`| 脳バランス | ${g.brainBalance||"—"} |`);
+  L.push(`| 測定日 | ${a.date} |`);
+  L.push("");
+
+  L.push("## アセスメント総合スコア（D4）\n");
+  L.push(`**${a.totalScore!=null?a.totalScore:"未算出"} / 50点**\n`);
+
+  L.push("## 領域別スコア\n");
+  L.push("| 領域 | 獲得点 | 配点 | 素点 | 満点 | 達成率 |");
+  L.push("|------|--------|------|------|------|--------|");
+  for(const[dk,dv]of Object.entries(DOMAINS)){
+    const s=a.scores?.[dk]||{raw:0,max:0,points:0};
+    const pct=s.max>0?Math.round(s.raw/s.max*100):0;
+    L.push(`| ${dk} | ${s.points} | ${dv.alloc} | ${s.raw} | ${s.max} | ${pct}% |`);
+  }
+  L.push("");
+
+  // 領域ごとに詳細
+  let curRegion="";
+  for(const item of ITEMS){
+    if(item.r!==curRegion){
+      curRegion=item.r;
+      L.push(`## ${curRegion}（配点: ${DOMAINS[curRegion].alloc}点）\n`);
+      L.push("| 種目 | サブカテゴリ | 判定結果 | スコア | 最大 | メモ |");
+      L.push("|------|-------------|---------|--------|------|------|");
+    }
+    const sv=a.items[item.n]||{};
+    const memo=(a.memos?.[item.n]||"").replace(/\n/g," ");
+    const result=sv.result||"未入力";
+    const score=sv.score!=null?sv.score:"—";
+    L.push(`| ${item.n} | ${item.s} | ${result} | ${score} | ${item.mx} | ${memo} |`);
+  }
+  L.push("");
+
+  // 課題サマリー（エラー項目の一覧）
+  L.push("## 課題サマリー（スコアが最大値未満の項目）\n");
+  const issues=[];
+  for(const item of ITEMS){
+    const sv=a.items[item.n];
+    if(!sv||sv.score==null)continue;
+    if(sv.score<item.mx)issues.push({name:item.n,region:item.r,sub:item.s,result:sv.result,score:sv.score,mx:item.mx});
+  }
+  if(issues.length){
+    L.push("| 種目 | 領域 | 判定結果 | スコア/最大 |");
+    L.push("|------|------|---------|------------|");
+    for(const i of issues)L.push(`| ${i.name} | ${i.region} | ${i.result} | ${i.score}/${i.mx} |`);
+  }else{
+    L.push("課題なし（全項目満点）\n");
+  }
+  L.push("");
+
+  // メモ一覧
+  const memos=[];
+  for(const item of ITEMS){
+    const m=a.memos?.[item.n];
+    if(m)memos.push({name:item.n,region:item.r,memo:m});
+  }
+  if(memos.length){
+    L.push("## メモ一覧\n");
+    L.push("| 種目 | 領域 | メモ |");
+    L.push("|------|------|------|");
+    for(const m of memos)L.push(`| ${m.name} | ${m.region} | ${m.memo.replace(/\n/g," ")} |`);
+    L.push("");
+  }
+
+  // 左右パターン分析（右/左 の偏り）
+  L.push("## 左右パターン分析\n");
+  let rightCount=0,leftCount=0,bothCount=0;
+  for(const item of ITEMS){
+    const sv=a.items[item.n];
+    if(!sv)continue;
+    const r=sv.result||"";
+    if(r==="右"||r.includes("右"))rightCount++;
+    if(r==="左"||r.includes("左"))leftCount++;
+    if(r==="両方")bothCount++;
+  }
+  L.push(`- 右側エラー含む項目: ${rightCount}個`);
+  L.push(`- 左側エラー含む項目: ${leftCount}個`);
+  L.push(`- 両方エラー: ${bothCount}個`);
+  L.push(`- 脳バランス判定: ${g.brainBalance||"未設定"}`);
+  L.push("");
+
+  L.push("---");
+  L.push("*このファイルは NOIC脳アセスメントチェック（HTML）から自動出力されたものです。レポート作成時にそのまま使用できます。*");
+
+  return L.join("\n");
+}
+
+function exportAssessmentMD(){
+  if(!currentGid){showToast("ゲストを選択してください");return}
+  const g=store.guests[currentGid];
+  const dates=Object.keys(g.assessments||{}).sort().reverse();
+  if(!dates.length){showToast("データがありません");return}
+  const date=dates[0];
+  const a=g.assessments[date];
+  calcScores(a);
+
+  const md=generateMarkdown(g,a);
+  const blob=new Blob([md],{type:"text/markdown;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const el=document.createElement("a");
+  el.href=url;
+  el.download=`脳アセスメント_${g.name.replace(/\s/g,"_")}_${date}.md`;
+  el.click();
+  URL.revokeObjectURL(url);
+  showToast("📝 脳アセスメント.md をダウンロードしました");
+}
+
+// ══════════════════════════════════════════════════════
+// INIT（クラウド版: Firestoreから読み込み → リアルタイム同期開始）
+// ══════════════════════════════════════════════════════
+async function initApp(){
+  // 1. まずlocalStorageから即時表示（オフライン対応）
+  store=migrateStore(loadStore());
+  renderGuestList();
+
+  // 2. Firestoreから読み込んでマージ（クラウドデータ優先）
+  try{
+    const cloud=await loadFromCloud();
+    // IDベースでマージ：両方にあればクラウド優先
+    store.guests={...store.guests,...cloud.guests};
+    if(cloud.trash.length>0)store.trash=cloud.trash;
+    localSaveStore(store);
+    renderGuestList();
+
+    // ローカルにあってクラウドにないゲストを初回アップロード
+    for(const[gid,guest]of Object.entries(store.guests)){
+      if(!cloud.guests[gid])saveGuestToCloud(gid,guest);
+    }
+
+    // 3. リアルタイム同期スタート
+    if(db){
+      startRealtimeSync();
+      document.getElementById("saveBadge").textContent="☁ クラウド接続";
+    }else{
+      document.getElementById("saveBadge").textContent="ローカル（FB未設定）";
+    }
+  }catch(e){
+    console.warn("Firestore接続失敗、ローカルで動作中:",e);
+    showToast("⚠ クラウド未接続。ローカルで動作中");
+    document.getElementById("saveBadge").textContent="⚠ ローカル";
+  }
+
+  // バックアップリマインダー
+  if(store.settings.lastExport){
+    const days=(Date.now()-new Date(store.settings.lastExport).getTime())/864e5;
+    if(days>7&&Object.keys(store.guests).length>0){
+      setTimeout(()=>showToast("💡 7日以上バックアップしていません"),2000);
+    }
+  }
+}
+
+initApp();
+</script>
+</body>
+</html>
