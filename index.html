@@ -496,9 +496,14 @@ async function saveGuestToCloud(gid,guest){
   catch(e){console.warn("cloud save error",e);}
 }
 async function deleteGuestFromCloud(gid){
-  if(!db) return;
-  try{await db.collection("guests").doc(gid).delete();}
-  catch(e){console.warn("cloud delete error",e);}
+  if(!db) return true;
+  try{
+    await db.collection("guests").doc(gid).delete();
+    return true;
+  }catch(e){
+    console.warn("cloud delete error",e);
+    return false;
+  }
 }
 async function saveTrashToCloud(trash){
   if(!db) return;
@@ -1070,25 +1075,48 @@ function renderResults(){
 // DELETE & TRASH
 // ══════════════════════════════════════════════════════
 let deleteTargetId=null;
+/** 削除確認の名前比較用（全角半角・連続空白のゆれを吸収） */
+function normalizeGuestName(s){
+  return String(s||"").normalize("NFKC").replace(/\s+/g," ").trim();
+}
 function openDeleteModal(){
   deleteTargetId=currentGid;
   document.getElementById("deleteConfirmName").value="";
   document.getElementById("modalDelete").classList.add("active");
 }
-function confirmDelete(){
-  const g=store.guests[deleteTargetId];if(!g)return;
-  const input=document.getElementById("deleteConfirmName").value.trim();
-  if(input!==g.name){showToast("⚠ 名前が一致しません");return}
-  g.deletedAt=nowIso();
-  store.trash.push(g);
-  delete store.guests[deleteTargetId];
-  deleteGuestFromCloud(deleteTargetId); // Firestoreからも削除
-  saveStore(store);
-  closeModal("modalDelete");
-  currentGid=null;
-  document.getElementById("assessGuestInfo").style.display="none";
-  showPage("pageGuests",document.querySelectorAll(".nav-btn")[0]);
-  showToast("🗑 "+g.name+" をゴミ箱に移動しました");
+async function confirmDelete(){
+  const gid=deleteTargetId;
+  const g=store.guests[gid];if(!g)return;
+  const btn=document.querySelector("#modalDelete .btn-danger");
+  const input=document.getElementById("deleteConfirmName").value;
+  if(normalizeGuestName(input)!==normalizeGuestName(g.name)){
+    showToast("⚠ 名前が一致しません（表示と同じ表記で入力してください）");
+    return;
+  }
+  if(btn)btn.disabled=true;
+  try{
+    g.deletedAt=nowIso();
+    store.trash.push(g);
+    const trashIdx=store.trash.length-1;
+    delete store.guests[gid];
+    const cloudOk=await deleteGuestFromCloud(gid);
+    if(db&&!cloudOk){
+      delete g.deletedAt;
+      store.trash.splice(trashIdx,1);
+      store.guests[gid]=g;
+      showToast("⚠ サーバーから削除できませんでした。通信を確認して再度お試しください");
+      renderGuestList();
+      return;
+    }
+    saveStore(store);
+    closeModal("modalDelete");
+    currentGid=null;
+    document.getElementById("assessGuestInfo").style.display="none";
+    showPage("pageGuests",document.querySelectorAll(".nav-btn")[0]);
+    showToast("🗑 "+g.name+" をゴミ箱に移動しました");
+  }finally{
+    if(btn)btn.disabled=false;
+  }
 }
 function renderTrash(){
   const el=document.getElementById("trashList");
