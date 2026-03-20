@@ -448,8 +448,20 @@ async function initFirebaseFromJson(){
     const key = (cfg.apiKey && String(cfg.apiKey).trim()) || "";
     const pid = (cfg.projectId && String(cfg.projectId).trim()) || "";
     if(!key || !pid) return false;
-    if(!firebase.apps.length){ firebase.initializeApp(cfg); }
-    db = firebase.firestore();
+    try{
+      firebase.initializeApp(cfg);
+    }catch(e){
+      if(!e||e.code!=="app/duplicate-app") throw e;
+    }
+    const fs = firebase.firestore();
+    // Safari・企業プロキシ等で WebChannel が落ちるときに効く（get / 同期の安定化）
+    try{
+      fs.settings({
+        experimentalAutoDetectLongPolling: true,
+        experimentalForceLongPolling: true,
+      });
+    }catch(e2){ console.warn("firestore.settings", e2); }
+    db = fs;
     return true;
   }catch(e){
     console.warn("firebase-config.json 読み込み失敗", e);
@@ -504,19 +516,41 @@ async function loadFromCloud(){
   const trash=tSnap.exists?(tSnap.data().items||[]):[];
   return{guests,trash,settings:{}};
 }
+/** 一時的な unavailable / デッドラインはリトライ（Safari・回線の瞬断対策） */
+async function loadFromCloudWithRetry(max=4){
+  let last;
+  for(let i=0;i<max;i++){
+    try{
+      return await loadFromCloud();
+    }catch(e){
+      last=e;
+      const code=(e&&e.code)?String(e.code):"";
+      const retry=/unavailable|deadline-exceeded|resource-exhausted|aborted|internal/i.test(code);
+      if(retry&&i<max-1){
+        await new Promise(r=>setTimeout(r,300*(i+1)));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw last;
+}
 let _syncUnsub=null;
 function startRealtimeSync(){
   if(!db) return;
   if(_syncUnsub)_syncUnsub();
-  _syncUnsub=db.collection("guests").onSnapshot(snap=>{
-    snap.docChanges().forEach(ch=>{
-      if(ch.type==="added"||ch.type==="modified"){store.guests[ch.doc.id]=ch.doc.data();}
-      else if(ch.type==="removed"){delete store.guests[ch.doc.id];}
-    });
-    localSaveStore(store);
-    renderGuestList();
-    if(currentGid&&store.guests[currentGid])renderResults(currentGid);
-  });
+  _syncUnsub=db.collection("guests").onSnapshot(
+    snap=>{
+      snap.docChanges().forEach(ch=>{
+        if(ch.type==="added"||ch.type==="modified"){store.guests[ch.doc.id]=ch.doc.data();}
+        else if(ch.type==="removed"){delete store.guests[ch.doc.id];}
+      });
+      localSaveStore(store);
+      renderGuestList();
+      if(currentGid&&store.guests[currentGid])renderResults(currentGid);
+    },
+    err=>{ console.warn("guests onSnapshot error", err); }
+  );
 }
 
 /* --- 統合 saveStore（ローカル + クラウド） --- */
@@ -1333,13 +1367,6 @@ function exportAssessmentMD(){
 // INIT（クラウド版: Firestoreから読み込み → リアルタイム同期開始）
 // ══════════════════════════════════════════════════════
 async function initApp(){
-  // GitHub Pages: /repo と /repo/ で相対パスがずれるため、末尾スラッシュを揃える（再読込なし）
-  if(location.protocol!=="file:"){
-    const p = location.pathname;
-    if(p.length>1 && !p.endsWith("/") && !/\.html$/i.test(p)){
-      history.replaceState(null,"",p+"/"+location.search+location.hash);
-    }
-  }
   // 1. まずlocalStorageから即時表示（オフライン対応）
   store=migrateStore(loadStore());
   renderGuestList();
@@ -1348,7 +1375,7 @@ async function initApp(){
 
   // 2. Firestoreから読み込んでマージ（クラウドデータ優先）
   try{
-    const cloud=await loadFromCloud();
+    const cloud=await loadFromCloudWithRetry();
     // IDベースでマージ：両方にあればクラウド優先
     store.guests={...store.guests,...cloud.guests};
     if(cloud.trash.length>0)store.trash=cloud.trash;
