@@ -1369,10 +1369,13 @@ async function initApp(){
     }
   }catch(e){
     console.warn("Firestore接続失敗、ローカルで動作中:",e);
-    const code = e && (e.code || e.message) ? String(e.code || e.message) : "";
-    let hint = "Firebase で Firestore・ルール・許可ドメイン（yuito0920.github.io）を確認";
-    if(/permission|insufficient/i.test(code)) hint = "Firestore 権限エラー → ルールと Authentication の許可ドメインを確認";
-    showToast("⚠ クラウド未接続。ローカルで動作中 — " + hint);
+    const fcode = (e && e.code) ? String(e.code) : "";
+    const short = fcode || ((e && e.message) ? String(e.message).slice(0, 60) : "unknown");
+    let hint = "Firebase → Firestore「ルール」を firestore.rules どおりにして「公開」";
+    if(/permission|insufficient/i.test(fcode)) hint = "ほぼ確実にルール未公開／拒否。コンソールで allow read, write: if true を公開";
+    if(/unavailable|deadline|network/i.test(fcode)) hint = "ネットワークまたは一時障害。しばらくして再読込";
+    if(/failed-precondition/i.test(fcode)) hint = "Firestore データベース未作成の可能性。コンソールで DB を作成";
+    showToast("⚠ クラウド未接続 [" + short + "] — " + hint);
     document.getElementById("saveBadge").textContent="⚠ ローカル";
   }
 
