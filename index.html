@@ -540,6 +540,46 @@ async function loadFromCloudWithRetry(max=4){
   }
   throw last;
 }
+/** Firestore Timestamp / 文字列を ISO 文字列へ（並び替え・fmtDate 用） */
+function firebaseDateToIso(v){
+  if(v==null||v==="")return"";
+  if(typeof v==="string")return v;
+  if(typeof v==="object"&&typeof v.toDate==="function"){
+    try{return v.toDate().toISOString()}catch(e){return""}
+  }
+  return"";
+}
+/**
+ * リモートのゲスト doc をローカルとマージ（部分更新で name 等が消えるのを防ぐ）
+ */
+function mergeGuestFromRemote(docId,incoming,prev){
+  const raw=incoming&&typeof incoming==="object"?incoming:{};
+  const p=prev&&typeof prev==="object"?prev:{};
+  const out={...p,...raw,id:docId};
+  out.assessments={...(p.assessments||{}),...(raw.assessments||{})};
+  const nm=String(out.name??"").trim();
+  if(!nm){
+    const pm=String(p.name??"").trim();
+    out.name=pm||"（名前未設定）";
+  }
+  const u=firebaseDateToIso(raw.updatedAt)||firebaseDateToIso(p.updatedAt);
+  const c=firebaseDateToIso(raw.createdAt)||firebaseDateToIso(p.createdAt);
+  if(u)out.updatedAt=u;
+  else if(!out.updatedAt&&p.updatedAt)out.updatedAt=firebaseDateToIso(p.updatedAt)||p.updatedAt;
+  if(c)out.createdAt=c;
+  return out;
+}
+function clearStaleCurrentGuest(reasonToast){
+  if(!currentGid||store.guests[currentGid])return false;
+  currentGid=null;
+  document.getElementById("scoreBar").classList.remove("active");
+  if(reasonToast)showToast(reasonToast);
+  const nav=document.querySelectorAll(".nav-btn");
+  if(document.getElementById("pageAssess").classList.contains("active")||document.getElementById("pageResults").classList.contains("active")){
+    showPage("pageGuests",nav[0]);
+  }
+  return true;
+}
 let _syncUnsub=null;
 function startRealtimeSync(){
   if(!db) return;
@@ -547,12 +587,20 @@ function startRealtimeSync(){
   _syncUnsub=db.collection("guests").onSnapshot(
     snap=>{
       snap.docChanges().forEach(ch=>{
-        if(ch.type==="added"||ch.type==="modified"){store.guests[ch.doc.id]=ch.doc.data();}
-        else if(ch.type==="removed"){delete store.guests[ch.doc.id];}
+        const id=ch.doc.id;
+        if(ch.type==="added"||ch.type==="modified"){
+          store.guests[id]=mergeGuestFromRemote(id,ch.doc.data(),store.guests[id]);
+        }else if(ch.type==="removed"){
+          delete store.guests[id];
+        }
       });
       localSaveStore(store);
       renderGuestList();
-      if(currentGid&&store.guests[currentGid])renderResults(currentGid);
+      clearStaleCurrentGuest("選択中のゲストが一覧にありません。ゲスト一覧へ戻しました");
+      if(currentGid&&store.guests[currentGid]){
+        if(document.getElementById("pageAssess").classList.contains("active"))renderAssessment();
+        if(document.getElementById("pageResults").classList.contains("active"))renderResults();
+      }
     },
     err=>{ console.warn("guests onSnapshot error", err); }
   );
@@ -590,7 +638,12 @@ let store={guests:{},trash:[],settings:{}};
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
 function nowIso(){return new Date().toISOString()}
-function fmtDate(d){if(!d)return"—";const p=d.split("T")[0].split("-");return p[0]+"/"+p[1]+"/"+p[2]}
+function fmtDate(d){
+  const iso=firebaseDateToIso(d);
+  if(!iso)return"—";
+  const p=iso.split("T")[0].split("-");
+  return p[0]+"/"+p[1]+"/"+p[2];
+}
 function esc(s){return(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
 
 let currentGid=null;
@@ -621,7 +674,8 @@ function closeModal(id){document.getElementById(id).classList.remove("active")}
 // ══════════════════════════════════════════════════════
 function renderGuestList(){
   const el=document.getElementById("guestList");
-  const ids=Object.keys(store.guests).sort((a,b)=>(store.guests[b].updatedAt||"").localeCompare(store.guests[a].updatedAt||""));
+  const ids=Object.keys(store.guests).sort((a,b)=>
+    (firebaseDateToIso(store.guests[b].updatedAt)||"").localeCompare(firebaseDateToIso(store.guests[a].updatedAt)||""));
   if(!ids.length){
     el.innerHTML='<div class="empty"><p style="font-size:14px">まだゲストが登録されていません</p><br><button class="btn btn-primary btn-sm" onclick="openNewGuestModal()">＋ 最初のゲストを登録</button></div>';
     return;
@@ -733,7 +787,11 @@ function selectGuest(id){
 // ASSESSMENT
 // ══════════════════════════════════════════════════════
 function renderAssessment(){
-  if(!currentGid||!store.guests[currentGid])return;
+  if(!currentGid)return;
+  if(!store.guests[currentGid]){
+    clearStaleCurrentGuest("このゲストは一覧にありません。ゲスト一覧へ戻しました");
+    return;
+  }
   const g=store.guests[currentGid];
   const initial=(g.name||"?").replace(/\s/g,"")[0]||"?";
 
@@ -1404,8 +1462,12 @@ async function initApp(){
   // 2. Firestoreから読み込んでマージ（クラウドデータ優先）
   try{
     const cloud=await loadFromCloudWithRetry();
-    // IDベースでマージ：両方にあればクラウド優先
-    store.guests={...store.guests,...cloud.guests};
+    // IDベースでマージ（部分docで name が消える事故を防ぐため1件ずつ merge）
+    const next={...store.guests};
+    for(const[id,data]of Object.entries(cloud.guests||{})){
+      next[id]=mergeGuestFromRemote(id,data,next[id]);
+    }
+    store.guests=next;
     if(cloud.trash.length>0)store.trash=cloud.trash;
     localSaveStore(store);
     renderGuestList();
