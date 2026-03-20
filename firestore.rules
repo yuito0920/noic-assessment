@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 社内URL共有前提（URLを知っている人が読み書き可）
+    // 本番で厳格化する場合は Firebase Authentication と組み合わせて書き換えること
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
