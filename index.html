@@ -1013,6 +1013,9 @@ function getAssessment(g,date){
 
 function buildItems(g,date){
   const container=document.getElementById("assessItems");
+  // 再構築前に開いているタブを記憶して、再構築後に復元する
+  const openRegions=new Set();
+  container.querySelectorAll(".card-body.open[data-region]").forEach(b=>openRegions.add(b.dataset.region));
   container.innerHTML="";
   const assessment=getAssessment(g,date);
   let currentRegion="";
@@ -1071,6 +1074,15 @@ function buildItems(g,date){
       <textarea class="memo-input" rows="1" placeholder="気づき・数値・状況などを記入（任意）" data-idx="${idx}" oninput="saveMemo(this)">${esc(memo)}</textarea>`;
     body.appendChild(div);
   });
+  // 再構築後、以前開いていたタブを復元する
+  if(openRegions.size>0){
+    container.querySelectorAll(".card-body[data-region]").forEach(b=>{
+      if(openRegions.has(b.dataset.region)){
+        b.classList.add("open");
+        b.previousElementSibling.classList.add("open");
+      }
+    });
+  }
 }
 
 function toggleCard(hdr){
