@@ -1545,6 +1545,11 @@ function importJSON(event){
 // ══════════════════════════════════════════════════════
 // MARKDOWN EXPORT（レポート用 脳アセスメント.md）
 // ══════════════════════════════════════════════════════
+/** MD表セル用：改行・パイプを壊さないよう正規化（分析用メモをそのまま渡す） */
+function mdTableCell(s){
+  if(s==null||s===undefined)return"";
+  return String(s).replace(/\r?\n/g," ").replace(/\|/g,"｜");
+}
 function generateMarkdown(g,a){
   const gt=g.type||"noic";
   const items=getItemsFor(gt);
@@ -1594,7 +1599,7 @@ function generateMarkdown(g,a){
       L.push("|------|-------------|---------|--------|------|------|");
     }
     const sv=a.items[item.n]||{};
-    const memo=(a.memos?.[item.n]||"").replace(/\n/g," ");
+    const memo=mdTableCell(a.memos?.[item.n]||"");
     const result=sv.result||"未入力";
     const score=sv.score!=null?(sv.score>=0?sv.score:"未実施"):"—";
     L.push(`| ${item.n} | ${item.s} | ${result} | ${score} | ${item.mx} | ${memo} |`);
@@ -1606,12 +1611,12 @@ function generateMarkdown(g,a){
   for(const item of items){
     const sv=a.items[item.n];
     if(!sv||sv.score==null)continue;
-    if(sv.score>=0&&sv.score<item.mx)issues.push({name:item.n,region:item.r,sub:item.s,result:sv.result,score:sv.score,mx:item.mx});
+    if(sv.score>=0&&sv.score<item.mx)issues.push({name:item.n,region:item.r,sub:item.s,result:sv.result,score:sv.score,mx:item.mx,memo:a.memos?.[item.n]||""});
   }
   if(issues.length){
-    L.push("| 種目 | 領域 | 判定結果 | スコア/最大 |");
-    L.push("|------|------|---------|------------|");
-    for(const i of issues)L.push(`| ${i.name} | ${i.region} | ${i.result} | ${i.score}/${i.mx} |`);
+    L.push("| 種目 | 領域 | 判定結果 | スコア/最大 | メモ |");
+    L.push("|------|------|---------|------------|------|");
+    for(const i of issues)L.push(`| ${i.name} | ${i.region} | ${i.result} | ${i.score}/${i.mx} | ${mdTableCell(i.memo)} |`);
   }else{
     L.push("課題なし（全項目満点）\n");
   }
@@ -1623,10 +1628,10 @@ function generateMarkdown(g,a){
     if(m)memos.push({name:item.n,region:item.r,memo:m});
   }
   if(memos.length){
-    L.push("## メモ一覧\n");
+    L.push("## メモ一覧（全項目・メモ入力があるもの）\n");
     L.push("| 種目 | 領域 | メモ |");
     L.push("|------|------|------|");
-    for(const m of memos)L.push(`| ${m.name} | ${m.region} | ${m.memo.replace(/\n/g," ")} |`);
+    for(const m of memos)L.push(`| ${mdTableCell(m.name)} | ${mdTableCell(m.region)} | ${mdTableCell(m.memo)} |`);
     L.push("");
   }
 
