@@ -805,6 +805,7 @@ function pickNewType(type){
   document.querySelectorAll("#newTypeSelector .type-opt").forEach(o=>o.classList.toggle("selected",o.dataset.type===type));
   document.getElementById("newFieldsNoic").style.display=type==="noic"?"block":"none";
   document.getElementById("newFieldsResync").style.display=type==="resync"?"block":"none";
+  document.getElementById("newAge").placeholder=type==="resync"?"例: 35歳":"例: 8歳";
 }
 
 // ══════════════════════════════════════════════════════
