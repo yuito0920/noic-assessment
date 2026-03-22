@@ -741,7 +741,20 @@ function startRealtimeSync(){
       renderGuestList();
       clearStaleCurrentGuest("選択中のゲストが一覧にありません。ゲスト一覧へ戻しました");
       if(currentGid&&store.guests[currentGid]){
-        if(document.getElementById("pageAssess").classList.contains("active"))renderAssessment();
+        const assessPage=document.getElementById("pageAssess");
+        const assessItems=document.getElementById("assessItems");
+        const assessActive=assessPage.classList.contains("active");
+        // assessItems 内に入力フォーカスがある（メモ入力中など）はDOM再構築しない
+        const userIsTyping=assessActive&&assessItems&&assessItems.contains(document.activeElement);
+        if(assessActive){
+          if(userIsTyping){
+            // スコアバー・進捗だけ更新してDOMには触れない
+            updateProgress();
+            updateScoreBar();
+          }else{
+            renderAssessment();
+          }
+        }
         if(document.getElementById("pageResults").classList.contains("active"))renderResults();
       }
     },
