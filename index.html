@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>NOIC 脳アセスメント</title>
+<title>脳アセスメント</title>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <!-- Firebase (compat SDK) -->
@@ -93,6 +93,30 @@ body{font-family:"Hiragino Kaku Gothic ProN","Meiryo",sans-serif;background:var(
 .region-迷走神経{border-left:4px solid #888}.region-迷走神経 .card-header{background:var(--gray-l)}
 .region-大脳基底核・中脳{border-left:4px solid #00897B}.region-大脳基底核・中脳 .card-header{background:var(--teal-l)}
 .region-原始反射{border-left:4px solid #AD1457}.region-原始反射 .card-header{background:var(--deepred-l)}
+/* resync regions */
+.region-バランス{border-left:4px solid #2E7D32}.region-バランス .card-header{background:#E8F5E9}
+.region-ビジョン{border-left:4px solid #7030A0}.region-ビジョン .card-header{background:#E2D9F3}
+.region-呼吸{border-left:4px solid #00897B}.region-呼吸 .card-header{background:#E0F2F1}
+
+/* Type badge */
+.type-badge{display:inline-block;font-size:9px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle;margin-left:4px}
+.type-badge.noic{background:#FDF0E6;color:#C05C00;border:1px solid #F0C090}
+.type-badge.resync{background:#E3F0FA;color:#2C5F8A;border:1px solid #A0C4E8}
+
+/* Filter tabs */
+.filter-tabs{display:flex;gap:6px;margin-bottom:14px}
+.filter-tab{padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;border:1.5px solid var(--border);background:#FFF;cursor:pointer;transition:.15s;user-select:none}
+.filter-tab:hover{border-color:var(--accent);color:var(--accent)}
+.filter-tab.active{background:var(--accent);color:#FFF;border-color:var(--accent)}
+.filter-tab .count{font-size:10px;font-weight:400;opacity:.8}
+
+/* Type selector in modal */
+.type-selector{display:flex;gap:8px;margin-bottom:16px}
+.type-opt{flex:1;padding:14px 10px;border-radius:10px;border:2px solid var(--border);text-align:center;cursor:pointer;transition:.15s;font-size:13px;font-weight:600}
+.type-opt:hover{border-color:var(--accent)}
+.type-opt.selected{border-color:var(--accent);background:var(--accent-light);color:var(--accent)}
+.type-opt .type-label{font-size:15px;display:block;margin-bottom:2px}
+.type-opt .type-desc{font-size:10px;font-weight:400;color:var(--sub)}
 
 /* Guest info bar (assessment page) */
 .guest-info-bar{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#FFF;border-radius:10px;box-shadow:var(--shadow);margin-bottom:12px;border-left:4px solid var(--accent)}
@@ -171,7 +195,7 @@ body{font-family:"Hiragino Kaku Gothic ProN","Meiryo",sans-serif;background:var(
 
 <!-- Header -->
 <div class="header">
-  <h1>NOIC 脳アセスメント</h1>
+  <h1>脳アセスメント</h1>
   <span class="save-badge" id="saveBadge">—</span>
 </div>
 
@@ -180,9 +204,14 @@ body{font-family:"Hiragino Kaku Gothic ProN","Meiryo",sans-serif;background:var(
 
 <!-- ▼ PAGE: Guest List -->
 <div class="page active" id="pageGuests">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
     <h2 style="font-size:18px">ゲスト一覧</h2>
     <button class="btn btn-primary btn-sm" onclick="openNewGuestModal()">＋ 新規ゲスト</button>
+  </div>
+  <div class="filter-tabs" id="filterTabs">
+    <div class="filter-tab active" data-filter="all" onclick="setFilter('all',this)">全て <span class="count" id="countAll"></span></div>
+    <div class="filter-tab" data-filter="noic" onclick="setFilter('noic',this)">NOIC <span class="count" id="countNoic"></span></div>
+    <div class="filter-tab" data-filter="resync" onclick="setFilter('resync',this)">resync <span class="count" id="countResync"></span></div>
   </div>
   <div class="card" id="guestList"></div>
 </div>
@@ -209,7 +238,7 @@ body{font-family:"Hiragino Kaku Gothic ProN","Meiryo",sans-serif;background:var(
     <button class="btn btn-outline btn-sm" onclick="collapseAll()">閉じる</button>
   </div>
   <div class="progress-bar"><div class="fill" id="progressFill" style="width:0%"></div></div>
-  <p style="font-size:11px;color:var(--sub);margin:3px 0 12px" id="progressText">0 / 46 入力済み</p>
+  <p style="font-size:11px;color:var(--sub);margin:3px 0 12px" id="progressText">0 / 62 入力済み</p>
   <div id="assessItems"></div>
 </div>
 
@@ -255,7 +284,7 @@ body{font-family:"Hiragino Kaku Gothic ProN","Meiryo",sans-serif;background:var(
   <div class="domain-scores" id="domainScores"></div>
   <div class="total-box">
     <div class="total-num" id="totalScore">—</div>
-    <div class="total-lbl">/ 50点</div>
+    <div class="total-lbl" id="totalLabel">/ 50点</div>
   </div>
 </div>
 
@@ -283,16 +312,31 @@ body{font-family:"Hiragino Kaku Gothic ProN","Meiryo",sans-serif;background:var(
 <div class="modal-overlay" id="modalNewGuest">
   <div class="modal">
     <h2>新規ゲスト登録</h2>
+    <div class="type-selector" id="newTypeSelector">
+      <div class="type-opt selected" data-type="noic" onclick="pickNewType('noic')">
+        <span class="type-label">NOIC</span>
+        <span class="type-desc">お子さま・発達支援</span>
+      </div>
+      <div class="type-opt" data-type="resync" onclick="pickNewType('resync')">
+        <span class="type-label">resync</span>
+        <span class="type-desc">大人・コンディション</span>
+      </div>
+    </div>
     <div class="form-group"><label>名前 *</label><input id="newName" placeholder="例: たなか たろう"></div>
     <div style="display:flex;gap:8px">
       <div class="form-group" style="flex:1"><label>性別</label>
         <select id="newGender"><option value="">—</option><option>男</option><option>女</option></select></div>
       <div class="form-group" style="flex:1"><label>年齢</label><input id="newAge" placeholder="例: 8歳"></div>
     </div>
-    <div class="form-group"><label>ステータス（園・学校など）</label><input id="newStatus" placeholder="例: 小学2年生（公立）"></div>
-    <div class="form-group"><label>診断名</label><input id="newDiag" placeholder="例: 特になし / ADHD など"></div>
-    <div class="form-group"><label>脳バランス</label>
-      <select id="newBalance"><option value="">—</option><option>左ヘミー原始反射</option><option>右ヘミー原始反射</option><option>混合</option><option>未評価</option></select></div>
+    <div id="newFieldsNoic">
+      <div class="form-group"><label>ステータス（園・学校など）</label><input id="newStatus" placeholder="例: 小学2年生（公立）"></div>
+      <div class="form-group"><label>診断名</label><input id="newDiag" placeholder="例: 特になし / ADHD など"></div>
+      <div class="form-group"><label>脳バランス</label>
+        <select id="newBalance"><option value="">—</option><option>左ヘミー原始反射</option><option>右ヘミー原始反射</option><option>混合</option><option>未評価</option></select></div>
+    </div>
+    <div id="newFieldsResync" style="display:none">
+      <div class="form-group"><label>主訴・目的</label><input id="newPurpose" placeholder="例: 肩こり改善 / パフォーマンス向上"></div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal('modalNewGuest')">キャンセル</button>
       <button class="btn btn-primary" onclick="createGuest()">登録する</button>
@@ -304,16 +348,22 @@ body{font-family:"Hiragino Kaku Gothic ProN","Meiryo",sans-serif;background:var(
 <div class="modal-overlay" id="modalEditGuest">
   <div class="modal">
     <h2>✏ ゲスト情報を編集</h2>
+    <div style="margin-bottom:12px"><span class="type-badge" id="editTypeBadge">NOIC</span> <span style="font-size:11px;color:var(--sub)" id="editTypeHint">タイプは変更できません</span></div>
     <div class="form-group"><label>名前 *</label><input id="editName" placeholder="例: たなか たろう"></div>
     <div style="display:flex;gap:8px">
       <div class="form-group" style="flex:1"><label>性別</label>
         <select id="editGender"><option value="">—</option><option>男</option><option>女</option></select></div>
       <div class="form-group" style="flex:1"><label>年齢</label><input id="editAge" placeholder="例: 8歳"></div>
     </div>
-    <div class="form-group"><label>ステータス（園・学校など）</label><input id="editStatus" placeholder="例: 小学2年生（公立）"></div>
-    <div class="form-group"><label>診断名</label><input id="editDiag" placeholder="例: 特になし / ADHD など"></div>
-    <div class="form-group"><label>脳バランス</label>
-      <select id="editBalance"><option value="">—</option><option>左ヘミー原始反射</option><option>右ヘミー原始反射</option><option>混合</option><option>未評価</option></select></div>
+    <div id="editFieldsNoic">
+      <div class="form-group"><label>ステータス（園・学校など）</label><input id="editStatus" placeholder="例: 小学2年生（公立）"></div>
+      <div class="form-group"><label>診断名</label><input id="editDiag" placeholder="例: 特になし / ADHD など"></div>
+      <div class="form-group"><label>脳バランス</label>
+        <select id="editBalance"><option value="">—</option><option>左ヘミー原始反射</option><option>右ヘミー原始反射</option><option>混合</option><option>未評価</option></select></div>
+    </div>
+    <div id="editFieldsResync" style="display:none">
+      <div class="form-group"><label>主訴・目的</label><input id="editPurpose" placeholder="例: 肩こり改善 / パフォーマンス向上"></div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal('modalEditGuest')">キャンセル</button>
       <button class="btn btn-primary" onclick="saveEditGuest()">保存する</button>
@@ -420,6 +470,54 @@ const DOMAINS={
   "原始反射":       {name:"原始反射",       alloc:10,color:"#AD1457",bg:"#FCE4EC"},
 };
 // 合計: 10+10+3+3+4+2+4+4+10 = 50点
+
+// ══════════════════════════════════════════════════════
+// RESYNC ITEM DATA (20種目: D4原始反射9 + D5バランス3 + D6ビジョン5 + D7呼吸3)
+// 未実施 = score -1 → 分母から除外
+// ══════════════════════════════════════════════════════
+const RESYNC_ITEMS=[
+  {r:"原始反射",s:"原始反射",n:"モロー反射",           d:"D4",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"原始反射",s:"TLR",     n:"TLR上向き",            d:"D4",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"原始反射",s:"TLR",     n:"TLR下向き",            d:"D4",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"原始反射",s:"ATNR",    n:"ATNR左",               d:"D4",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"原始反射",s:"ATNR",    n:"ATNR右",               d:"D4",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"原始反射",s:"STNR",    n:"STNR",                 d:"D4",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"原始反射",s:"ガラント",n:"ガラント",              d:"D4",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"原始反射",s:"上肢",    n:"把握反射",              d:"D4",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"原始反射",s:"下肢",    n:"足底反射",              d:"D4",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"バランス",s:"バランス",n:"フクダステップ",        d:"D5",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"バランス",s:"バランス",n:"タンデムウォーク開眼",  d:"D5",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"バランス",s:"バランス",n:"タンデムウォーク閉眼",  d:"D5",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"ビジョン",s:"ビジョン",n:"パスート",              d:"D6",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"ビジョン",s:"ビジョン",n:"サッケード",            d:"D6",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"ビジョン",s:"ビジョン",n:"輻輳",                  d:"D6",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"ビジョン",s:"ビジョン",n:"VOR",                   d:"D6",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"ビジョン",s:"ビジョン",n:"ブロックストリングス",  d:"D6",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"呼吸",    s:"呼吸",    n:"リブフレア",            d:"D7",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"呼吸",    s:"呼吸",    n:"呼吸パターン",          d:"D7",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+  {r:"呼吸",    s:"呼吸",    n:"エアハンガー",          d:"D7",mx:2,opts:[["問題なし",2],["ややエラー",1],["明確なエラー",0],["未実施",-1]]},
+];
+
+const RESYNC_DOMAINS={
+  "原始反射": {name:"原始反射(D4)", alloc:35, color:"#AD1457", bg:"#FCE4EC"},
+  "バランス": {name:"バランス(D5)", alloc:15, color:"#2E7D32", bg:"#E8F5E9"},
+  "ビジョン": {name:"ビジョン(D6)", alloc:35, color:"#7030A0", bg:"#E2D9F3"},
+  "呼吸":     {name:"呼吸(D7)",     alloc:15, color:"#00897B", bg:"#E0F2F1"},
+};
+// 合計: 35+15+35+15 = 100点
+
+// NOIC用（後方互換）— 既存の ITEMS / DOMAINS を参照
+const NOIC_ITEMS=ITEMS;
+const NOIC_DOMAINS=DOMAINS;
+
+function guestType(gid){ return (store.guests[gid]||{}).type||"noic"; }
+function currentType(){ return guestType(currentGid); }
+function getItemsFor(type){ return type==="resync"?RESYNC_ITEMS:NOIC_ITEMS; }
+function getDomainsFor(type){ return type==="resync"?RESYNC_DOMAINS:NOIC_DOMAINS; }
+function curItems(){ return getItemsFor(currentType()); }
+function curDomains(){ return getDomainsFor(currentType()); }
+function curMaxScore(){ return currentType()==="resync"?100:50; }
+function typeLabel(type){ return type==="resync"?"resync":"NOIC"; }
 
 // ══════════════════════════════════════════════════════
 // FIREBASE CONFIG（同じフォルダの firebase-config.json を読む）
@@ -651,6 +749,21 @@ function esc(s){return(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace
 
 let currentGid=null;
 let radarChart=null;
+let guestFilter="all";
+let newGuestType="noic";
+
+function setFilter(f,btn){
+  guestFilter=f;
+  document.querySelectorAll(".filter-tab").forEach(t=>t.classList.remove("active"));
+  if(btn)btn.classList.add("active");
+  renderGuestList();
+}
+function pickNewType(type){
+  newGuestType=type;
+  document.querySelectorAll("#newTypeSelector .type-opt").forEach(o=>o.classList.toggle("selected",o.dataset.type===type));
+  document.getElementById("newFieldsNoic").style.display=type==="noic"?"block":"none";
+  document.getElementById("newFieldsResync").style.display=type==="resync"?"block":"none";
+}
 
 // ══════════════════════════════════════════════════════
 // NAV
@@ -677,27 +790,40 @@ function closeModal(id){document.getElementById(id).classList.remove("active")}
 // ══════════════════════════════════════════════════════
 function renderGuestList(){
   const el=document.getElementById("guestList");
-  const ids=Object.keys(store.guests).sort((a,b)=>
+  const allIds=Object.keys(store.guests).sort((a,b)=>
     (firebaseDateToIso(store.guests[b].updatedAt)||"").localeCompare(firebaseDateToIso(store.guests[a].updatedAt)||""));
+  // counts
+  const cNoic=allIds.filter(id=>(store.guests[id].type||"noic")==="noic").length;
+  const cResync=allIds.filter(id=>store.guests[id].type==="resync").length;
+  const ce=id=>document.getElementById(id);
+  if(ce("countAll"))ce("countAll").textContent="("+allIds.length+")";
+  if(ce("countNoic"))ce("countNoic").textContent="("+cNoic+")";
+  if(ce("countResync"))ce("countResync").textContent="("+cResync+")";
+  // filter
+  const ids=guestFilter==="all"?allIds:allIds.filter(id=>(store.guests[id].type||"noic")===guestFilter);
   if(!ids.length){
-    el.innerHTML='<div class="empty"><p style="font-size:14px">まだゲストが登録されていません</p><br><button class="btn btn-primary btn-sm" onclick="openNewGuestModal()">＋ 最初のゲストを登録</button></div>';
+    const msg=allIds.length===0?"まだゲストが登録されていません":("該当するゲストがありません");
+    el.innerHTML='<div class="empty"><p style="font-size:14px">'+msg+'</p><br><button class="btn btn-primary btn-sm" onclick="openNewGuestModal()">＋ ゲストを登録</button></div>';
     return;
   }
   el.innerHTML=ids.map(id=>{
     const g=store.guests[id];
+    const gt=g.type||"noic";
     const sc=getLatestScore(g);
+    const maxPt=gt==="resync"?100:50;
     const initial=(g.name||"?").replace(/\s/g,"")[0]||"?";
     const dateCount=Object.keys(g.assessments||{}).length;
+    const metaParts=[g.age,g.gender,gt==="noic"?g.status:g.purpose].filter(Boolean);
     return`<div>
       <div class="guest-row" onclick="selectGuest('${id}')">
         <div class="avatar" style="width:38px;height:38px;font-size:15px">${esc(initial)}</div>
         <div class="info">
-          <div class="gname">${esc(g.name)}</div>
-          <div class="gmeta">${esc(g.age||"")} ${esc(g.gender||"")}${g.status?" | "+esc(g.status):""} | 測定${dateCount}回 | ${fmtDate(g.updatedAt)}</div>
+          <div class="gname">${esc(g.name)} <span class="type-badge ${gt}">${typeLabel(gt)}</span></div>
+          <div class="gmeta">${esc(metaParts.join(" | "))} | 測定${dateCount}回 | ${fmtDate(g.updatedAt)}</div>
         </div>
         <div style="text-align:right">
           <div class="gscore">${sc!==null?sc:"—"}</div>
-          <div style="font-size:9px;color:var(--sub)">/ 50pt</div>
+          <div style="font-size:9px;color:var(--sub)">/ ${maxPt}pt</div>
         </div>
       </div>
       <div class="guest-edit-row">
@@ -712,13 +838,15 @@ function getLatestScore(g){
   const dates=Object.keys(g.assessments||{}).sort().reverse();
   if(!dates.length)return null;
   const a=g.assessments[dates[0]];
-  return a.totalScore!=null?Math.floor(a.totalScore):null;
+  if(a.totalScore!=null)return Math.floor(a.totalScore);
+  return null;
 }
 
 function openNewGuestModal(){
-  ["newName","newAge","newStatus","newDiag"].forEach(id=>document.getElementById(id).value="");
+  ["newName","newAge","newStatus","newDiag","newPurpose"].forEach(id=>{const e=document.getElementById(id);if(e)e.value="";});
   document.getElementById("newGender").value="";
   document.getElementById("newBalance").value="";
+  pickNewType("noic");
   document.getElementById("modalNewGuest").classList.add("active");
   setTimeout(()=>document.getElementById("newName").focus(),100);
 }
@@ -732,12 +860,19 @@ function openEditGuestModal(){
 function openEditGuestModalById(id){
   const g=store.guests[id];if(!g)return;
   editTargetId=id;
+  const gt=g.type||"noic";
+  const badge=document.getElementById("editTypeBadge");
+  badge.textContent=typeLabel(gt);
+  badge.className="type-badge "+gt;
+  document.getElementById("editFieldsNoic").style.display=gt==="noic"?"block":"none";
+  document.getElementById("editFieldsResync").style.display=gt==="resync"?"block":"none";
   document.getElementById("editName").value=g.name||"";
   document.getElementById("editGender").value=g.gender||"";
   document.getElementById("editAge").value=g.age||"";
   document.getElementById("editStatus").value=g.status||"";
   document.getElementById("editDiag").value=g.diagnosis||"";
   document.getElementById("editBalance").value=g.brainBalance||"";
+  document.getElementById("editPurpose").value=g.purpose||"";
   document.getElementById("modalEditGuest").classList.add("active");
   setTimeout(()=>document.getElementById("editName").focus(),100);
 }
@@ -748,9 +883,14 @@ function saveEditGuest(){
   g.name=name;
   g.gender=document.getElementById("editGender").value;
   g.age=document.getElementById("editAge").value.trim();
-  g.status=document.getElementById("editStatus").value.trim();
-  g.diagnosis=document.getElementById("editDiag").value.trim();
-  g.brainBalance=document.getElementById("editBalance").value;
+  const gt=g.type||"noic";
+  if(gt==="noic"){
+    g.status=document.getElementById("editStatus").value.trim();
+    g.diagnosis=document.getElementById("editDiag").value.trim();
+    g.brainBalance=document.getElementById("editBalance").value;
+  }else{
+    g.purpose=document.getElementById("editPurpose").value.trim();
+  }
   g.updatedAt=nowIso();
   saveStore(store);
   closeModal("modalEditGuest");
@@ -764,16 +904,21 @@ function createGuest(){
   const name=document.getElementById("newName").value.trim();
   if(!name){showToast("名前を入力してください");return}
   const id=uid();
-  store.guests[id]={
-    id,name,
+  const gt=newGuestType;
+  const base={id,name,type:gt,
     gender:document.getElementById("newGender").value,
     age:document.getElementById("newAge").value.trim(),
-    status:document.getElementById("newStatus").value.trim(),
-    diagnosis:document.getElementById("newDiag").value.trim(),
-    brainBalance:document.getElementById("newBalance").value,
     createdAt:nowIso(),updatedAt:nowIso(),
     assessments:{}
   };
+  if(gt==="noic"){
+    base.status=document.getElementById("newStatus").value.trim();
+    base.diagnosis=document.getElementById("newDiag").value.trim();
+    base.brainBalance=document.getElementById("newBalance").value;
+  }else{
+    base.purpose=document.getElementById("newPurpose").value.trim();
+  }
+  store.guests[id]=base;
   saveStore(store);
   closeModal("modalNewGuest");
   showToast("✓ "+name+" を登録しました");
@@ -799,10 +944,11 @@ function renderAssessment(){
   const initial=(g.name||"?").replace(/\s/g,"")[0]||"?";
 
   // Guest info bar (直接DOM更新 → overlayしない)
+  const gt=g.type||"noic";
   document.getElementById("assessAvatar").textContent=initial;
-  document.getElementById("assessName").textContent=g.name;
-  document.getElementById("assessMeta").textContent=
-    [g.age,g.gender,g.diagnosis].filter(Boolean).join(" | ")||"—";
+  document.getElementById("assessName").innerHTML=esc(g.name)+' <span class="type-badge '+gt+'">'+typeLabel(gt)+'</span>';
+  const metaArr=gt==="noic"?[g.age,g.gender,g.diagnosis]:[g.age,g.gender,g.purpose];
+  document.getElementById("assessMeta").textContent=metaArr.filter(Boolean).join(" | ")||"—";
 
   // Date
   const today=new Date().toISOString().split("T")[0];
@@ -828,11 +974,12 @@ function buildItems(g,date){
   container.innerHTML="";
   const assessment=getAssessment(g,date);
   let currentRegion="";
+  const _items=curItems();
 
-  ITEMS.forEach((item,idx)=>{
+  _items.forEach((item,idx)=>{
     if(item.r!==currentRegion){
       currentRegion=item.r;
-      const rItems=ITEMS.filter(i=>i.r===currentRegion);
+      const rItems=_items.filter(i=>i.r===currentRegion);
       const filled=rItems.filter(i=>assessment.items[i.n]?.result!==undefined).length;
       const card=document.createElement("div");
       card.className=`card region-${currentRegion}`;
@@ -903,7 +1050,7 @@ function pickOpt(el){
   const idx=parseInt(el.dataset.idx);
   const label=el.dataset.label;
   const score=parseInt(el.dataset.score);
-  const item=ITEMS[idx];
+  const item=curItems()[idx];
 
   el.parentElement.querySelectorAll(".opt").forEach(o=>o.classList.remove("selected"));
   el.classList.add("selected");
@@ -936,7 +1083,7 @@ function calcMultiScore(checked){
 }
 function pickMulti(el){
   const idx=parseInt(el.dataset.idx);
-  const item=ITEMS[idx];
+  const item=curItems()[idx];
   const container=el.closest(".multi-checks");
   const allCbs=container.querySelectorAll("input[type='checkbox']");
 
@@ -979,7 +1126,7 @@ function pickMulti(el){
 
 function saveMemo(el){
   const idx=parseInt(el.dataset.idx);
-  const item=ITEMS[idx];
+  const item=curItems()[idx];
   const g=store.guests[currentGid];if(!g)return;
   const date=document.getElementById("assessDate").value;
   const a=getAssessment(g,date);
@@ -988,15 +1135,21 @@ function saveMemo(el){
   saveStore(store);
 }
 
-function calcScores(a){
+function calcScores(a,_items,_domains){
+  const items=_items||curItems();
+  const domains=_domains||curDomains();
   const ds={};
-  for(const[dk,dv]of Object.entries(DOMAINS)){
-    const dItems=ITEMS.filter(i=>i.r===dk);
+  for(const[dk,dv]of Object.entries(domains)){
+    const dItems=items.filter(i=>i.r===dk);
     let raw=0,mx=0;
     dItems.forEach(it=>{
       const sv=a.items[it.n];
-      if(sv&&sv.score!=null)raw+=sv.score;
-      mx+=it.mx;
+      if(sv&&sv.score!=null){
+        if(sv.score>=0){raw+=sv.score;mx+=it.mx;}
+        // score < 0 (未実施): excluded entirely
+      }else{
+        mx+=it.mx;
+      }
     });
     ds[dk]={raw,max:mx,points:mx>0?Math.round(raw/mx*dv.alloc*10)/10:0};
   }
@@ -1008,17 +1161,18 @@ function updateProgress(){
   const g=store.guests[currentGid];if(!g)return;
   const date=document.getElementById("assessDate").value;
   const a=getAssessment(g,date);
+  const total=curItems().length;
   const n=Object.keys(a.items).length;
-  const pct=Math.round(n/62*100);
+  const pct=total>0?Math.round(n/total*100):0;
   document.getElementById("progressFill").style.width=pct+"%";
-  document.getElementById("progressText").textContent=n+" / 62 入力済み（"+pct+"%）";
+  document.getElementById("progressText").textContent=n+" / "+total+" 入力済み（"+pct+"%）";
 }
 
 function updateRegionCount(region){
   const g=store.guests[currentGid];if(!g)return;
   const date=document.getElementById("assessDate").value;
   const a=getAssessment(g,date);
-  const rItems=ITEMS.filter(i=>i.r===region);
+  const rItems=curItems().filter(i=>i.r===region);
   const filled=rItems.filter(i=>a.items[i.n]?.result!==undefined).length;
   const el=document.getElementById("rcnt-"+region);
   if(el)el.textContent=filled+"/"+rItems.length;
@@ -1028,13 +1182,15 @@ function updateScoreBar(){
   const g=store.guests[currentGid];if(!g)return;
   const date=document.getElementById("assessDate").value;
   const a=getAssessment(g,date);
+  const domains=curDomains();
   calcScores(a);
   document.getElementById("domainScores").innerHTML=
-    Object.entries(DOMAINS).map(([dk,dv])=>{
+    Object.entries(domains).map(([dk,dv])=>{
       const pts=a.scores?.[dk]?.points||0;
       return`<div class="domain-pill" style="border-left:3px solid ${dv.color}">${dv.name} <strong>${pts}</strong>/${dv.alloc}</div>`;
     }).join("");
   document.getElementById("totalScore").textContent=a.totalScore!=null?a.totalScore:"—";
+  document.getElementById("totalLabel").textContent="/ "+curMaxScore()+"点";
   document.getElementById("scoreBar").classList.add("active");
 }
 
@@ -1047,30 +1203,35 @@ function renderResults(){
     el.innerHTML='<div class="empty"><p>ゲスト一覧からゲストを選択してください</p></div>';return;
   }
   const g=store.guests[currentGid];
+  const gt=g.type||"noic";
+  const items=curItems();
+  const domains=curDomains();
+  const maxScore=curMaxScore();
   const dates=Object.keys(g.assessments||{}).sort().reverse();
   if(!dates.length){el.innerHTML='<div class="empty"><p>アセスメントデータがありません</p></div>';return}
   const date=dates[0];
   const a=g.assessments[date];
-  calcScores(a);
+  calcScores(a,items,domains);
 
+  const domainCount=Object.keys(domains).length;
   const initial=(g.name||"?").replace(/\s/g,"")[0]||"?";
   let html=`<div class="card" style="padding:16px">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
       <div class="avatar">${esc(initial)}</div>
-      <div><strong style="font-size:15px">${esc(g.name)}</strong>
+      <div><strong style="font-size:15px">${esc(g.name)}</strong> <span class="type-badge ${gt}">${typeLabel(gt)}</span>
         <div style="font-size:11px;color:var(--sub)">${esc(g.age||"")} ${esc(g.gender||"")} | 測定日: ${date}</div>
       </div>
     </div>
     <div style="text-align:center;padding:16px 0;background:var(--accent-light);border-radius:10px">
-      <div style="font-size:11px;color:var(--sub);margin-bottom:4px">脳アセスメントスコア（9領域）</div>
+      <div style="font-size:11px;color:var(--sub);margin-bottom:4px">脳アセスメントスコア（${domainCount}領域）</div>
       <div style="font-size:52px;font-weight:700;color:var(--accent);line-height:1">${a.totalScore!=null?a.totalScore:"—"}</div>
-      <div style="font-size:14px;color:var(--sub)">/ 50 点</div>
+      <div style="font-size:14px;color:var(--sub)">/ ${maxScore} 点</div>
     </div>
   </div>`;
 
   html+=`<div class="card"><div class="card-header open" style="background:var(--accent-light);cursor:default">ドメイン別スコア</div>
     <div class="card-body open" style="display:block;padding-top:14px">`;
-  for(const[dk,dv]of Object.entries(DOMAINS)){
+  for(const[dk,dv]of Object.entries(domains)){
     const s=a.scores?.[dk]||{raw:0,max:0,points:0};
     const pct=s.max>0?Math.round(s.raw/s.max*100):0;
     html+=`<div class="domain-row">
@@ -1086,11 +1247,11 @@ function renderResults(){
   html+=`<div class="card"><div class="card-header open" style="background:var(--accent-light);cursor:default">レーダーチャート</div>
     <div class="card-body open" style="display:block"><div class="chart-wrap"><canvas id="radarCanvas"></canvas></div></div></div>`;
 
-  const hasMemos=ITEMS.some(it=>a.memos?.[it.n]);
+  const hasMemos=items.some(it=>a.memos?.[it.n]);
   if(hasMemos){
     html+=`<div class="card"><div class="card-header open" style="background:#FFF9E6;cursor:default">📝 メモ一覧</div>
       <div class="card-body open" style="display:block;padding-top:10px">`;
-    ITEMS.forEach(it=>{
+    items.forEach(it=>{
       const memo=a.memos?.[it.n];
       if(memo)html+=`<div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #F0F0F0">
         <span style="font-size:12px;font-weight:600">${esc(it.n)}</span><span style="font-size:10px;color:var(--sub);margin-left:6px">${esc(it.s)}</span>
@@ -1112,20 +1273,19 @@ function renderResults(){
   setTimeout(()=>{
     const canvas=document.getElementById("radarCanvas");if(!canvas)return;
     if(radarChart)radarChart.destroy();
-    const radarLabels={
-      "前頭葉":"前頭葉","小脳":"小脳","頭頂葉":"頭頂葉","側頭葉":"側頭葉",
-      "後頭葉":"後頭葉","島皮質":"島皮質","迷走神経":"迷走神経",
-      "大脳基底核・中脳":"基底核\n中脳","原始反射":"原始反射"
-    };
+    const accentRgb=gt==="resync"?"44,95,138":"192,92,0";
     radarChart=new Chart(canvas,{type:"radar",data:{
-      labels:Object.keys(DOMAINS).map(k=>radarLabels[k]||k),
+      labels:Object.keys(domains).map(k=>{
+        const short={"大脳基底核・中脳":"基底核\n中脳","原始反射(D4)":"原始反射","バランス(D5)":"バランス","ビジョン(D6)":"ビジョン","呼吸(D7)":"呼吸"};
+        return short[k]||short[domains[k]?.name]||k;
+      }),
       datasets:[{label:"達成率 %",
-        data:Object.entries(DOMAINS).map(([dk,dv])=>{
+        data:Object.entries(domains).map(([dk,dv])=>{
           const s=a.scores?.[dk]||{points:0};
           return dv.alloc>0?Math.round(s.points/dv.alloc*100):0;
         }),
-        backgroundColor:"rgba(192,92,0,0.12)",borderColor:"rgba(192,92,0,0.8)",
-        borderWidth:2,pointBackgroundColor:"rgba(192,92,0,1)",pointRadius:4
+        backgroundColor:`rgba(${accentRgb},0.12)`,borderColor:`rgba(${accentRgb},0.8)`,
+        borderWidth:2,pointBackgroundColor:`rgba(${accentRgb},1)`,pointRadius:4
       }]
     },options:{scales:{r:{min:0,max:100,ticks:{stepSize:25,font:{size:9}},
       pointLabels:{font:{size:10}}}},plugins:{legend:{display:false}},responsive:true}});
@@ -1209,33 +1369,43 @@ function restoreGuest(idx){
 function exportCurrentExcel(){
   if(!currentGid){showToast("ゲストを選択してください");return}
   const g=store.guests[currentGid];
+  const gt=g.type||"noic";
+  const items=curItems();
+  const domains=curDomains();
+  const maxScore=curMaxScore();
   const dates=Object.keys(g.assessments||{}).sort().reverse();
   if(!dates.length){showToast("データがありません");return}
   const date=dates[0];
   const a=g.assessments[date];
-  calcScores(a);
+  calcScores(a,items,domains);
 
   const wb=XLSX.utils.book_new();
+  const brandLabel=typeLabel(gt);
 
   // ── Sheet 1: サマリー ──
   const sumRows=[
-    ["NOIC 脳アセスメント 結果サマリー"],
+    [brandLabel+" 脳アセスメント 結果サマリー"],
     [],
     ["名前",g.name,"性別",g.gender,"年齢",g.age],
-    ["ステータス",g.status,"診断名",g.diagnosis,"脳バランス",g.brainBalance],
-    ["測定日",date,"出力日",new Date().toLocaleDateString("ja-JP")],
-    [],
-    ["■ 脳アセスメントスコア（D4-D8）"],
-    ["ドメイン","素点","満点","配点(pt)","獲得点","達成率"],
   ];
-  for(const[dk,dv]of Object.entries(DOMAINS)){
+  if(gt==="noic"){
+    sumRows.push(["ステータス",g.status,"診断名",g.diagnosis,"脳バランス",g.brainBalance]);
+  }else{
+    sumRows.push(["主訴・目的",g.purpose||"—"]);
+  }
+  sumRows.push(["測定日",date,"出力日",new Date().toLocaleDateString("ja-JP")]);
+  sumRows.push([]);
+  const domainRange=gt==="resync"?"D4-D7":"D4-D8";
+  sumRows.push(["■ 脳アセスメントスコア（"+domainRange+"）"]);
+  sumRows.push(["ドメイン","素点","満点","配点(pt)","獲得点","達成率"]);
+  for(const[dk,dv]of Object.entries(domains)){
     const s=a.scores?.[dk]||{raw:0,max:0,points:0};
     const pct=s.max>0?Math.round(s.raw/s.max*100):0;
     sumRows.push([dk+" "+dv.name, s.raw, s.max, dv.alloc, s.points, pct+"%"]);
   }
-  sumRows.push(["合計","","",50,a.totalScore,"—"]);
+  sumRows.push(["合計","","",maxScore,a.totalScore,"—"]);
   sumRows.push([]);
-  sumRows.push(["■ 脳スコアはNOIC独自の指標であり、医学的診断を示すものではありません。"]);
+  sumRows.push(["■ 脳スコアは"+brandLabel+"独自の指標であり、医学的診断を示すものではありません。"]);
 
   const wsSummary=XLSX.utils.aoa_to_sheet(sumRows);
   wsSummary["!cols"]=[{wch:28},{wch:12},{wch:8},{wch:10},{wch:10},{wch:8}];
@@ -1243,17 +1413,17 @@ function exportCurrentExcel(){
 
   // ── Sheet 2: 詳細結果 ──
   const detRows=[
-    ["NOIC 脳アセスメント 詳細結果"],
+    [brandLabel+" 脳アセスメント 詳細結果"],
     ["ゲスト: "+g.name+" | 測定日: "+date],
     [],
     ["#","ドメイン","脳領域","サブカテゴリ","種目","判定結果","スコア","最大","メモ"],
   ];
-  ITEMS.forEach((item,i)=>{
+  items.forEach((item,i)=>{
     const sv=a.items[item.n]||{};
     const memo=a.memos?.[item.n]||"";
     detRows.push([
       i+1, item.d, item.r, item.s, item.n,
-      sv.result||"未入力", sv.score!=null?sv.score:"", item.mx, memo
+      sv.result||"未入力", sv.score!=null?(sv.score>=0?sv.score:"未実施"):"", item.mx, memo
     ]);
   });
 
@@ -1263,7 +1433,7 @@ function exportCurrentExcel(){
 
   // ── Sheet 3: メモ一覧 ──
   const memoRows=[["種目","脳領域","サブカテゴリ","メモ内容"]];
-  ITEMS.forEach(it=>{
+  items.forEach(it=>{
     const memo=a.memos?.[it.n];
     if(memo)memoRows.push([it.n,it.r,it.s,memo]);
   });
@@ -1273,7 +1443,7 @@ function exportCurrentExcel(){
     XLSX.utils.book_append_sheet(wb,wsMemo,"メモ一覧");
   }
 
-  const fn=`NOIC_${g.name.replace(/\s/g,"_")}_${date}.xlsx`;
+  const fn=`${brandLabel}_${g.name.replace(/\s/g,"_")}_${date}.xlsx`;
   XLSX.writeFile(wb,fn);
   store.settings.lastExport=nowIso();
   saveStore(store);
@@ -1287,7 +1457,7 @@ function emailExcel(){
   const email=document.getElementById("emailTo")?.value?.trim()||"";
   exportCurrentExcel();
   const g=store.guests[currentGid];
-  const subject=encodeURIComponent("NOIC 脳アセスメント: "+(g?.name||""));
+  const subject=encodeURIComponent(typeLabel(g?.type||"noic")+" 脳アセスメント: "+(g?.name||""));
   const body=encodeURIComponent("脳アセスメント結果を添付します。\n\nダウンロードされたExcelファイルをこのメールに添付して送信してください。");
   setTimeout(()=>window.location.href=`mailto:${email}?subject=${subject}&body=${body}`,400);
   showToast("✉ メールアプリを開きます。ExcelをExcel附付してください");
@@ -1300,7 +1470,7 @@ function exportAllJSON(){
   const blob=new Blob([JSON.stringify(store,null,2)],{type:"application/json"});
   const url=URL.createObjectURL(blob);
   const a=document.createElement("a");
-  a.href=url;a.download="NOIC_backup_"+new Date().toISOString().split("T")[0]+".json";
+  a.href=url;a.download="brain_assessment_backup_"+new Date().toISOString().split("T")[0]+".json";
   a.click();URL.revokeObjectURL(url);
   store.settings.lastExport=nowIso();saveStore(store);
   showToast("💾 バックアップを保存しました");
@@ -1334,57 +1504,67 @@ function importJSON(event){
 // MARKDOWN EXPORT（レポート用 脳アセスメント.md）
 // ══════════════════════════════════════════════════════
 function generateMarkdown(g,a){
+  const gt=g.type||"noic";
+  const items=getItemsFor(gt);
+  const domains=getDomainsFor(gt);
+  const maxScore=gt==="resync"?100:50;
+  const brandLabel=typeLabel(gt);
+  calcScores(a,items,domains);
   const L=[];
-  L.push("# NOIC 脳アセスメント結果\n");
+  L.push(`# ${brandLabel} 脳アセスメント結果\n`);
   L.push("## 基本情報\n");
   L.push("| 項目 | 内容 |");
   L.push("|------|------|");
   L.push(`| 名前 | ${g.name} |`);
+  L.push(`| タイプ | ${brandLabel} |`);
   L.push(`| 性別 | ${g.gender||"—"} |`);
   L.push(`| 年齢 | ${g.age||"—"} |`);
-  L.push(`| ステータス | ${g.status||"—"} |`);
-  L.push(`| 診断名 | ${g.diagnosis||"—"} |`);
-  L.push(`| 脳バランス | ${g.brainBalance||"—"} |`);
+  if(gt==="noic"){
+    L.push(`| ステータス | ${g.status||"—"} |`);
+    L.push(`| 診断名 | ${g.diagnosis||"—"} |`);
+    L.push(`| 脳バランス | ${g.brainBalance||"—"} |`);
+  }else{
+    L.push(`| 主訴・目的 | ${g.purpose||"—"} |`);
+  }
   L.push(`| 測定日 | ${a.date} |`);
   L.push("");
 
-  L.push("## アセスメント総合スコア（D4）\n");
-  L.push(`**${a.totalScore!=null?a.totalScore:"未算出"} / 50点**\n`);
+  const domainRange=gt==="resync"?"D4-D7":"D4";
+  L.push(`## アセスメント総合スコア（${domainRange}）\n`);
+  L.push(`**${a.totalScore!=null?a.totalScore:"未算出"} / ${maxScore}点**\n`);
 
   L.push("## 領域別スコア\n");
   L.push("| 領域 | 獲得点 | 配点 | 素点 | 満点 | 達成率 |");
   L.push("|------|--------|------|------|------|--------|");
-  for(const[dk,dv]of Object.entries(DOMAINS)){
+  for(const[dk,dv]of Object.entries(domains)){
     const s=a.scores?.[dk]||{raw:0,max:0,points:0};
     const pct=s.max>0?Math.round(s.raw/s.max*100):0;
     L.push(`| ${dk} | ${s.points} | ${dv.alloc} | ${s.raw} | ${s.max} | ${pct}% |`);
   }
   L.push("");
 
-  // 領域ごとに詳細
   let curRegion="";
-  for(const item of ITEMS){
+  for(const item of items){
     if(item.r!==curRegion){
       curRegion=item.r;
-      L.push(`## ${curRegion}（配点: ${DOMAINS[curRegion].alloc}点）\n`);
+      L.push(`## ${curRegion}（配点: ${domains[curRegion].alloc}点）\n`);
       L.push("| 種目 | サブカテゴリ | 判定結果 | スコア | 最大 | メモ |");
       L.push("|------|-------------|---------|--------|------|------|");
     }
     const sv=a.items[item.n]||{};
     const memo=(a.memos?.[item.n]||"").replace(/\n/g," ");
     const result=sv.result||"未入力";
-    const score=sv.score!=null?sv.score:"—";
+    const score=sv.score!=null?(sv.score>=0?sv.score:"未実施"):"—";
     L.push(`| ${item.n} | ${item.s} | ${result} | ${score} | ${item.mx} | ${memo} |`);
   }
   L.push("");
 
-  // 課題サマリー（エラー項目の一覧）
   L.push("## 課題サマリー（スコアが最大値未満の項目）\n");
   const issues=[];
-  for(const item of ITEMS){
+  for(const item of items){
     const sv=a.items[item.n];
     if(!sv||sv.score==null)continue;
-    if(sv.score<item.mx)issues.push({name:item.n,region:item.r,sub:item.s,result:sv.result,score:sv.score,mx:item.mx});
+    if(sv.score>=0&&sv.score<item.mx)issues.push({name:item.n,region:item.r,sub:item.s,result:sv.result,score:sv.score,mx:item.mx});
   }
   if(issues.length){
     L.push("| 種目 | 領域 | 判定結果 | スコア/最大 |");
@@ -1395,9 +1575,8 @@ function generateMarkdown(g,a){
   }
   L.push("");
 
-  // メモ一覧
   const memos=[];
-  for(const item of ITEMS){
+  for(const item of items){
     const m=a.memos?.[item.n];
     if(m)memos.push({name:item.n,region:item.r,memo:m});
   }
@@ -1409,25 +1588,26 @@ function generateMarkdown(g,a){
     L.push("");
   }
 
-  // 左右パターン分析（右/左 の偏り）
-  L.push("## 左右パターン分析\n");
-  let rightCount=0,leftCount=0,bothCount=0;
-  for(const item of ITEMS){
-    const sv=a.items[item.n];
-    if(!sv)continue;
-    const r=sv.result||"";
-    if(r==="右"||r.includes("右"))rightCount++;
-    if(r==="左"||r.includes("左"))leftCount++;
-    if(r==="両方")bothCount++;
+  if(gt==="noic"){
+    L.push("## 左右パターン分析\n");
+    let rightCount=0,leftCount=0,bothCount=0;
+    for(const item of items){
+      const sv=a.items[item.n];
+      if(!sv)continue;
+      const r=sv.result||"";
+      if(r==="右"||r.includes("右"))rightCount++;
+      if(r==="左"||r.includes("左"))leftCount++;
+      if(r==="両方")bothCount++;
+    }
+    L.push(`- 右側エラー含む項目: ${rightCount}個`);
+    L.push(`- 左側エラー含む項目: ${leftCount}個`);
+    L.push(`- 両方エラー: ${bothCount}個`);
+    L.push(`- 脳バランス判定: ${g.brainBalance||"未設定"}`);
+    L.push("");
   }
-  L.push(`- 右側エラー含む項目: ${rightCount}個`);
-  L.push(`- 左側エラー含む項目: ${leftCount}個`);
-  L.push(`- 両方エラー: ${bothCount}個`);
-  L.push(`- 脳バランス判定: ${g.brainBalance||"未設定"}`);
-  L.push("");
 
   L.push("---");
-  L.push("*このファイルは NOIC脳アセスメントチェック（HTML）から自動出力されたものです。レポート作成時にそのまま使用できます。*");
+  L.push(`*このファイルは ${brandLabel}脳アセスメントチェック（HTML）から自動出力されたものです。レポート作成時にそのまま使用できます。*`);
 
   return L.join("\n");
 }
@@ -1446,7 +1626,8 @@ function exportAssessmentMD(){
   const url=URL.createObjectURL(blob);
   const el=document.createElement("a");
   el.href=url;
-  el.download=`脳アセスメント_${g.name.replace(/\s/g,"_")}_${date}.md`;
+  const gt=g.type||"noic";
+  el.download=`脳アセスメント_${typeLabel(gt)}_${g.name.replace(/\s/g,"_")}_${date}.md`;
   el.click();
   URL.revokeObjectURL(url);
   showToast("📝 脳アセスメント.md をダウンロードしました");
