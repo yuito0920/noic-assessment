@@ -72,6 +72,11 @@ body{font-family:"Hiragino Kaku Gothic ProN","Meiryo",sans-serif;background:var(
 .opt.sx{border-style:dashed;color:var(--sub)}
 .opt.sx.selected{background:#999;color:#FFF;border-style:solid}
 .score-badge.sx{background:#E8E8E8;color:#999}
+/* 2段階選択で方向だけ選び、程度が未選択のまま＝まだ保存されていない状態 */
+.score-badge.spend{background:#FFE0B2;color:#9A4B00;animation:pendPulse 1.2s ease-in-out infinite}
+@keyframes pendPulse{0%,100%{opacity:1}50%{opacity:.45}}
+.stepped-deg-warn{font-size:11px;font-weight:700;color:#C1440E;margin:2px 0 4px}
+.progress-warn{color:#C1440E;font-weight:700;margin-left:8px}
 
 /* Multi-check (固定視など) */
 .multi-checks{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
@@ -1456,7 +1461,7 @@ function buildItems(g,date){
     div.innerHTML=`
       <div class="item-name">
         <span style="font-size:13px;font-weight:600">${item.n}</span>
-        <span class="score-badge ${scClass}" id="badge-${idx}">${sc!=null?sc:"—"}</span>
+        <span class="score-badge ${scClass}" id="badge-${idx}">${sc!=null?(sc<0?"除外":sc):"—"}</span>
         <span style="font-size:10px;color:var(--sub)">${item.s}</span>
       </div>
       ${item.hint?'<div class="item-hint">📋 '+esc(item.hint)+'</div>':''}
@@ -1533,13 +1538,38 @@ function pickSteppedDir(el){
     if(prevDeg){
       const degScore=parseInt(prevDeg.dataset.degscore);
       saveStepped(idx,item,dirLabel,null,prevDeg.dataset.deg,degScore);
+    }else{
+      // 程度を選ぶまでスコアが決まらないので保存できない。
+      // 「選んだつもりで抜ける」事故を防ぐため、未確定であることを明示する。
+      setSteppedPending(idx,true);
     }
   }else{
+    setSteppedPending(idx,false);
     degDiv.classList.remove("open");
     degDiv.querySelectorAll(".opt").forEach(o=>o.classList.remove("selected"));
     saveStepped(idx,item,dirLabel,dirScore,"",null);
   }
 }
+function setSteppedPending(idx,on){
+  const badge=document.getElementById("badge-"+idx);
+  if(badge){
+    if(on){ badge.textContent="!"; badge.className="score-badge spend"; }
+  }
+  const degDiv=document.getElementById("deg-"+idx);
+  if(!degDiv)return;
+  let warn=degDiv.querySelector(".stepped-deg-warn");
+  if(on){
+    if(!warn){
+      warn=document.createElement("div");
+      warn.className="stepped-deg-warn";
+      warn.textContent="⚠ 程度を選ぶまで保存されません";
+      degDiv.insertBefore(warn,degDiv.firstChild);
+    }
+  }else if(warn){
+    warn.remove();
+  }
+}
+
 function pickSteppedDeg(el){
   const idx=parseInt(el.dataset.idx);
   const item=curItems()[idx];
@@ -1549,6 +1579,7 @@ function pickSteppedDeg(el){
   el.classList.add("selected");
   const dirEl=el.closest(".item").querySelector(".stepped-dir .opt.selected");
   const dirLabel=dirEl?dirEl.dataset.dir:"";
+  setSteppedPending(idx,false);
   saveStepped(idx,item,dirLabel,null,degLabel,degScore);
 }
 function pickSteppedExtra(el){
@@ -1666,23 +1697,54 @@ function saveMemo(el){
 function calcScores(a,_items,_domains){
   const items=_items||curItems();
   const domains=_domains||curDomains();
+  // v8（33種目）は「未入力」も分母に入れない。
+  //   旧仕様は未入力を 0 点として分母に算入していたため、
+  //   未入力 → 「評価不可」に変えた瞬間に分母だけ減って点数が上がって見えた（2026-08-23 スタッフ指摘）。
+  //   未入力は「まだ測っていない」であって 0 点ではないので、評価不可と同じく分母から外す。
+  //   → 入力途中のスコアは「入力済みの分での達成率（暫定値）」になる。updateScoreBar が暫定であることを明示する。
+  //   v6（62種目）と resync は従来どおり。過去ゲストの表示スコアを動かさないため。
+  const isV8 = (items===NOIC_ITEMS_V8);
   const ds={};
   for(const[dk,dv]of Object.entries(domains)){
     const dItems=items.filter(i=>i.r===dk);
-    let raw=0,mx=0;
+    let raw=0,mx=0,unavail=0,blank=0;
     dItems.forEach(it=>{
       const sv=a.items[it.n];
       if(sv&&sv.score!=null){
         if(sv.score>=0){raw+=sv.score;mx+=it.mx;}
-        // score < 0 (未実施): excluded entirely
+        else{unavail++;}   // 評価不可（score<0）: 分子・分母とも除外
       }else{
-        mx+=it.mx;
+        blank++;
+        if(!isV8)mx+=it.mx; // v6/resync のみ 未入力を 0 点として分母に算入（従来動作を維持）
       }
     });
-    ds[dk]={raw,max:mx,points:mx>0?Math.round(raw/mx*dv.alloc*10)/10:0};
+    ds[dk]={raw,max:mx,points:mx>0?Math.round(raw/mx*dv.alloc*10)/10:0,
+            unavailable:unavail,blank:blank,counted:dItems.length-unavail-blank,items:dItems.length,
+            missing:mx===0};
   }
   a.scores=ds;
-  a.totalScore=Math.floor(Object.values(ds).reduce((s,d)=>s+d.points,0));
+  if(isV8){
+    // 領域まるごと評価不可／未入力（分母0）になった領域は「欠測」として満点から外し、
+    // 残った領域の配点で 100 点に再正規化する。
+    //   0 点として合計に入れると「測れなかった」が「できなかった」と同じ減点になってしまう。
+    //   Python 側 noic_brain_score_v8.py は既にこの按分（欠測ドメインの重みを再正規化）をしており、
+    //   アプリだけ 0 点算入で食い違っていた（2026-08-23 修正）。
+    let sum=0,allocSum=0;
+    for(const[dk,dv]of Object.entries(domains)){
+      if(!ds[dk].missing){ sum+=ds[dk].points; allocSum+=dv.alloc; }
+    }
+    a.totalScore=allocSum>0?Math.floor(sum*100/allocSum):null;
+  }else{
+    a.totalScore=Math.floor(Object.values(ds).reduce((s,d)=>s+d.points,0));
+  }
+}
+
+/** 未入力が残ったまま出力しようとしていないか確認する（未入力は分母から外れるため、暫定値のまま書き出されてしまう） */
+function confirmIfIncomplete(a,label){
+  let blank=0;
+  for(const sc of Object.values(a.scores||{}))blank+=sc.blank||0;
+  if(!blank)return true;
+  return confirm(`未入力が ${blank} 件あります。\nこのまま${label}すると、入力済みの分だけで換算した【暫定スコア】が書き出されます。\n\n続けますか？`);
 }
 
 function updateProgress(){
@@ -1693,7 +1755,16 @@ function updateProgress(){
   const n=Object.keys(a.items).length;
   const pct=total>0?Math.round(n/total*100):0;
   document.getElementById("progressFill").style.width=pct+"%";
-  document.getElementById("progressText").textContent=n+" / "+total+" 入力済み（"+pct+"%）";
+  const rest=total-n;
+  const el=document.getElementById("progressText");
+  el.textContent=n+" / "+total+" 入力済み（"+pct+"%）";
+  // 残りが少ないほど見落としやすいので、未入力が残っている限り件数を出し続ける
+  if(rest>0){
+    const w=document.createElement("span");
+    w.className="progress-warn";
+    w.textContent="⚠ 未入力 "+rest+"件";
+    el.appendChild(w);
+  }
 }
 
 function updateRegionCount(region){
@@ -1712,13 +1783,34 @@ function updateScoreBar(){
   const a=peekAssessment(g,date);
   const domains=curDomains();
   calcScores(a);
+  let _blankAll=0,_unavailAll=0,_thin=0;
   document.getElementById("domainScores").innerHTML=
     Object.entries(domains).map(([dk,dv])=>{
-      const pts=a.scores?.[dk]?.points||0;
-      return`<div class="domain-pill" style="border-left:3px solid ${dv.color}">${dv.name} <strong>${pts}</strong>/${dv.alloc}</div>`;
+      const sc=a.scores?.[dk]||{};
+      const pts=sc.missing?"—":(sc.points||0);
+      _blankAll+=sc.blank||0; _unavailAll+=sc.unavailable||0;
+      // 評価不可が半数以上＝残った少数の種目でその領域の点が決まってしまう。参考値として明示する
+      // 領域内の評価不可が半数以上＝残った少数の種目でその領域の点が決まる（領域まるごと欠測も含む）
+      const thin=(sc.items||0)>0 && (sc.unavailable||0)*2>=(sc.items||0);
+      if(thin)_thin++;
+      const note=[];
+      if(sc.unavailable)note.push("除外"+sc.unavailable);
+      if(sc.blank)note.push("未入力"+sc.blank);
+      const noteHtml=note.length?`<span style="font-size:9px;color:${thin?"#C1440E":"#888"};margin-left:4px">${thin?"⚠":""}${note.join("/")}</span>`:"";
+      return`<div class="domain-pill" style="border-left:3px solid ${dv.color}">${dv.name} <strong>${pts}</strong>/${dv.alloc}${noteHtml}</div>`;
     }).join("");
-  document.getElementById("totalScore").textContent=a.totalScore!=null?a.totalScore:"—";
-  document.getElementById("totalLabel").textContent="/ "+curMaxScore()+"点";
+  const _num=document.getElementById("totalScore");
+  _num.textContent=a.totalScore!=null?a.totalScore:"—";
+  // 未入力が残っている間の合計は「入力済みの分での換算」＝暫定値。確定値と誤読させない
+  _num.style.color=_blankAll>0?"#B0B0B0":"";
+  const _lbl=document.getElementById("totalLabel");
+  if(_blankAll>0){
+    _lbl.innerHTML=`/ ${curMaxScore()}点<br><span style="font-size:9px;color:#C1440E;font-weight:700">暫定・未入力${_blankAll}件</span>`;
+  }else if(_unavailAll>0){
+    _lbl.innerHTML=`/ ${curMaxScore()}点<br><span style="font-size:9px;color:${_thin?"#C1440E":"#888"}">${_thin?"⚠ ":""}評価不可${_unavailAll}件を除外</span>`;
+  }else{
+    _lbl.textContent="/ "+curMaxScore()+"点";
+  }
   document.getElementById("scoreBar").classList.add("active");
 
   // ── NOIC v6 D4-D10 配点表示（脳スコア用・60点満点） ──
@@ -1943,6 +2035,7 @@ function exportCurrentExcel(){
   const date=dates[0];
   const a=g.assessments[date];
   calcScores(a,items,domains);
+  if(!confirmIfIncomplete(a,"Excelを出力"))return;
 
   const wb=XLSX.utils.book_new();
   const brandLabel=typeLabel(gt);
@@ -1965,6 +2058,7 @@ function exportCurrentExcel(){
   sumRows.push(["ドメイン","素点","満点","配点(pt)","獲得点","達成率"]);
   for(const[dk,dv]of Object.entries(domains)){
     const s=a.scores?.[dk]||{raw:0,max:0,points:0};
+    if(s.missing){ sumRows.push([dk+" "+dv.name, "—", "—", dv.alloc, "—", "測定不可（満点から除外）"]); continue; }
     const pct=s.max>0?Math.round(s.raw/s.max*100):0;
     sumRows.push([dk+" "+dv.name, s.raw, s.max, dv.alloc, s.points, pct+"%"]);
   }
@@ -2106,11 +2200,23 @@ function generateMarkdown(g,a){
   L.push(`## アセスメント総合スコア（${domainRange}）\n`);
   L.push(`**${a.totalScore!=null?a.totalScore:"未算出"} / ${maxScore}点**\n`);
 
+  // ── 入力状況（評価不可・未入力は達成率の分母から除外している。Python 側の確信度判定に使う）──
+  let _blankN=0,_unavailN=0;
+  for(const[dk]of Object.entries(domains)){
+    const sc=a.scores?.[dk]||{};
+    _blankN+=sc.blank||0; _unavailN+=sc.unavailable||0;
+  }
+  L.push(`- 実施 **${items.length-_blankN-_unavailN} / ${items.length}** 種目（評価不可 ${_unavailN}件・未入力 ${_blankN}件 は達成率の分母から除外）\n`);
+  if(_blankN>0)L.push(`> ⚠ 未入力が ${_blankN} 件あります。このスコアは暫定値です。全種目を入力してから出力し直してください。\n`);
+  if(_unavailN>0)L.push(`> ℹ 評価不可 ${_unavailN} 件は分母から外して計算しています（0点として減点していません）。件数が多い領域は少数の種目で点が決まるため、参考値として扱ってください。\n`);
+
   L.push("## 領域別スコア\n");
   L.push("| 領域 | 獲得点 | 配点 | 素点 | 満点 | 達成率 |");
   L.push("|------|--------|------|------|------|--------|");
   for(const[dk,dv]of Object.entries(domains)){
     const s=a.scores?.[dk]||{raw:0,max:0,points:0};
+    // 領域まるごと測れなかった場合は 0% ではなく欠測として示す（満点からも外している）
+    if(s.missing){ L.push(`| ${dk} | — | ${dv.alloc} | — | — | 測定不可（満点から除外） |`); continue; }
     const pct=s.max>0?Math.round(s.raw/s.max*100):0;
     L.push(`| ${dk} | ${s.points} | ${dv.alloc} | ${s.raw} | ${s.max} | ${pct}% |`);
   }
@@ -2139,8 +2245,9 @@ function generateMarkdown(g,a){
     let v6Total=0;
     for(const v6d of["D4","D5","D6","D7","D8","D9","D10"]){
       const raw=v6Raw[v6d],max=v6Max[v6d],w=V6_WEIGHTS[v6d];
-      const pct=max>0?(raw/max*100):0;
-      const pt=max>0?(raw/max*w):0;
+      if(max===0){ L.push(`| ${v6d} | ${V6_LABELS[v6d]} | — | — | 測定不可 | ${w} | 欠測（Python 側で他ドメインに按分） |`); continue; }
+      const pct=raw/max*100;
+      const pt=raw/max*w;
       v6Total+=pt;
       L.push(`| ${v6d} | ${V6_LABELS[v6d]} | ${raw} | ${max} | ${pct.toFixed(1)}% | ${w} | ${pt.toFixed(2)} |`);
     }
@@ -2227,6 +2334,7 @@ function exportAssessmentMD(){
   const date=dates[0];
   const a=g.assessments[date];
   calcScores(a);
+  if(!confirmIfIncomplete(a,"MDを出力"))return;
 
   const md=generateMarkdown(g,a);
   const blob=new Blob([md],{type:"text/markdown;charset=utf-8"});
