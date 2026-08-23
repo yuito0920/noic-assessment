@@ -1114,12 +1114,14 @@ function migrateStore(st){
  *   アプリで開き直したときにしか再計算されないため、それ以降触っていない測定分だけ
  *   古い値（およそ半分）が残り、ゲスト一覧に半分の点数が出ていた（2026-08-23 発見・10件）。
  *   計算ロジックは変更していない。再計算値が保存値のほぼ2倍のときだけ直す（想定外の書き換えを防ぐ）。
- *   元の値は _scoreBackup に残す。v8（33種目）は最初から正しいので対象外。
+ *   v8（33種目）は別条件: 2026-08-23 の修正（領域まるごと評価不可を満点から除外／未入力を分母から
+ *   除外）より前に保存された分だけ直す。以降に測ったゲストへは遡及適用しない。
+ *   元の値はどちらも _scoreBackup に残す。
  */
 function migrateScores(st){
   const fixed=[];
   for(const[gid,g]of Object.entries(st.guests||{})){
-    if((g.schemaVer||1)>=NOIC_V8_MIN_SCHEMA)continue;
+    const isV8=(g.schemaVer||1)>=NOIC_V8_MIN_SCHEMA;
     const items=getItemsFor(g.type||"noic",g.schemaVer);
     const domains=getDomainsFor(g.type||"noic",g.schemaVer);
     for(const[date,a]of Object.entries(g.assessments||{})){
@@ -1128,10 +1130,19 @@ function migrateScores(st){
       if(a._scoreBackup)continue;              // 一度直した分は触らない
       const probe=JSON.parse(JSON.stringify(a));
       calcScores(probe,items,domains);
-      const ratio=probe.totalScore/saved;
-      if(ratio<1.8||ratio>2.2)continue;        // 2倍化の取りこぼし以外は触らない
-      a._scoreBackup={totalScore:saved,scores:a.scores,
-        note:"2026-05-08 の 50→100点満点化が未反映だった分を 2026-08-23 に再計算"};
+      if(probe.totalScore===saved)continue;
+      let note;
+      if(isV8){
+        // v8 は 2026-08-23 の修正（領域まるごと評価不可を満点から除外・未入力を分母から除外）より前に
+        // 保存された分だけ直す。それ以降に測ったゲストへ遡及適用しないための日付ガード
+        if(String(a.savedAt||"")>="2026-08-24")continue;
+        note="2026-08-23 の修正（領域まるごと評価不可を満点から除外）を反映して再計算";
+      }else{
+        const ratio=probe.totalScore/saved;
+        if(ratio<1.8||ratio>2.2)continue;      // 2倍化の取りこぼし以外は触らない
+        note="2026-05-08 の 50→100点満点化が未反映だった分を 2026-08-23 に再計算";
+      }
+      a._scoreBackup={totalScore:saved,scores:a.scores,note};
       a.scores=probe.scores;
       a.totalScore=probe.totalScore;
       _migrateChangedGids.add(gid);
