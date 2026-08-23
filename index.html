@@ -1104,7 +1104,42 @@ function migrateStore(st){
     }
   }
   if(changed)localSaveStore(st);
+  migrateScores(st);
   return st;
+}
+
+/**
+ * 保存済み totalScore が 50点満点時代のまま残っているアセスメントを現行ロジックで計算し直す。
+ *   2026-05-08 に 50点満点 → 100点満点へ2倍化したが、totalScore はアセスメントを
+ *   アプリで開き直したときにしか再計算されないため、それ以降触っていない測定分だけ
+ *   古い値（およそ半分）が残り、ゲスト一覧に半分の点数が出ていた（2026-08-23 発見・10件）。
+ *   計算ロジックは変更していない。再計算値が保存値のほぼ2倍のときだけ直す（想定外の書き換えを防ぐ）。
+ *   元の値は _scoreBackup に残す。v8（33種目）は最初から正しいので対象外。
+ */
+function migrateScores(st){
+  const fixed=[];
+  for(const[gid,g]of Object.entries(st.guests||{})){
+    if((g.schemaVer||1)>=NOIC_V8_MIN_SCHEMA)continue;
+    const items=getItemsFor(g.type||"noic",g.schemaVer);
+    const domains=getDomainsFor(g.type||"noic",g.schemaVer);
+    for(const[date,a]of Object.entries(g.assessments||{})){
+      const saved=a.totalScore;
+      if(saved==null||saved<=0)continue;
+      if(a._scoreBackup)continue;              // 一度直した分は触らない
+      const probe=JSON.parse(JSON.stringify(a));
+      calcScores(probe,items,domains);
+      const ratio=probe.totalScore/saved;
+      if(ratio<1.8||ratio>2.2)continue;        // 2倍化の取りこぼし以外は触らない
+      a._scoreBackup={totalScore:saved,scores:a.scores,
+        note:"2026-05-08 の 50→100点満点化が未反映だった分を 2026-08-23 に再計算"};
+      a.scores=probe.scores;
+      a.totalScore=probe.totalScore;
+      _migrateChangedGids.add(gid);
+      fixed.push({name:g.name,date,before:saved,after:probe.totalScore});
+    }
+  }
+  if(fixed.length){localSaveStore(st);console.info("スコア再計算（50→100点満点の取りこぼし）:",fixed);}
+  return fixed;
 }
 // cloud版: 起動時は空で初期化し、initApp()でlocalStorage/Firestoreから上書き
 let store={guests:{},trash:[],settings:{}};
@@ -2408,6 +2443,9 @@ async function initApp(){
       for(const dt of recoverDates)saveGuestToCloud(gid,guest,dt);
       if(recoverDates.length)console.info("復元アップロード:",guest.name,recoverDates.join(","));
     }
+
+    // 2b-3. クラウドから降ってきた分にも 50→100点満点の取りこぼしを適用する
+    migrateScores(store);
 
     // 2c. マイグレーション修正分をクラウドへ
     for(const gid of _migrateChangedGids){
