@@ -826,14 +826,50 @@ function loadStore(){
   try{const d=localStorage.getItem(STORE_KEY);return d?JSON.parse(d):{guests:{},trash:[],settings:{}}}
   catch(e){return{guests:{},trash:[],settings:{}}}
 }
+let _localSaveBroken=false;
 function localSaveStore(st){
-  try{
-    localStorage.setItem(STORE_KEY,JSON.stringify(st));
-    localStorage.setItem(STORE_KEY+"_bak",JSON.stringify(st));
+  // 端末保存が失敗しても黙らせない（2026-08-24 改修）。
+  // 旧実装は容量超過などをトースト1回で流しており、以後ずっと端末に保存されない
+  // まま気づけなかった。本体とバックアップを分けて書き、失敗はバッジに残す。
+  let json;
+  try{json=JSON.stringify(st);}catch(e){console.error("stringify failed",e);return;}
+  let ok=false;
+  try{localStorage.setItem(STORE_KEY,json);ok=true;}
+  catch(e){
+    // 容量超過のときは、まずバックアップ側を捨ててもう一度だけ試す
+    try{localStorage.removeItem(STORE_KEY+"_bak");localStorage.setItem(STORE_KEY,json);ok=true;}
+    catch(e2){console.error("localStorage save failed",e2);}
+  }
+  if(ok){try{localStorage.setItem(STORE_KEY+"_bak",json);}catch(e){/* 本体が入っていればよい */}}
+  const b=document.getElementById("saveBadge");
+  if(!ok){
+    _localSaveBroken=true;
+    if(b){b.textContent="🔴 端末に保存できません";b.style.color="#c62828";}
+    showToast("⚠ 端末の保存領域がいっぱいです。データはクラウドにのみ保存されています。バックアップを書き出してください");
+    return;
+  }
+  if(_localSaveBroken){_localSaveBroken=false;if(b)b.style.color="";}
+  if(b){
     const h=new Date().getHours().toString().padStart(2,"0");
     const m=new Date().getMinutes().toString().padStart(2,"0");
-    document.getElementById("saveBadge").textContent="✓ "+h+":"+m+" 保存";
-  }catch(e){showToast("⚠ 保存エラー")}
+    b.textContent="✓ "+h+":"+m+" 保存";
+  }
+}
+
+/** 端末の保存領域がどれくらい埋まっているかを見て、限界前に知らせる */
+function checkLocalStorageRoom(){
+  try{
+    let bytes=0;
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      bytes+=(k.length+(localStorage.getItem(k)||"").length)*2;
+    }
+    const mb=bytes/1048576;
+    if(mb>3.5){
+      showToast("⚠ 端末の保存領域が"+mb.toFixed(1)+"MBです（上限およそ5MB）。ホーム画面からバックアップを書き出してください");
+    }
+    return mb;
+  }catch(e){return null;}
 }
 
 /* --- Firestore 読み書き --- */
@@ -882,20 +918,41 @@ function _cloudSavedBadge(){
  * - changedDate: そのアセスメント日付だけをフィールド単位で差し替え
  * - removedDates: 日付キーの削除（FieldValue.delete）
  */
-async function saveGuestToCloud(gid,guest,changedDate,removedDates){
+async function saveGuestToCloud(gid,guest,changedDate,removedDates,opts){
   if(!db) return;
   try{
     // 削除後に遅延到着した書き込みがドキュメントを復活させない
     if(!store.guests[gid]||store.guests[gid]!==guest)return;
     const ref=db.collection("guests").doc(gid);
     const FP=firebase.firestore.FieldPath;
+    const DEL=firebase.firestore.FieldValue.delete();
     const args=[];
     for(const[k,v]of Object.entries(guest)){
       if(k==="assessments")continue;
       args.push(new FP(k),v===undefined?null:v);
     }
     if(changedDate&&guest.assessments&&guest.assessments[changedDate]){
-      args.push(new FP("assessments",changedDate),guest.assessments[changedDate]);
+      const a=guest.assessments[changedDate];
+      const o=opts||{};
+      const single=(o.item!==undefined)||(o.removedItem!==undefined)||(o.memo!==undefined)||(o.memos&&o.memos.length>0);
+      if(single){
+        /* ── 項目単位の更新（2026-08-24 追加）────────────────────────────
+         * 日付シートを丸ごと送ると、そのとき手元にあった items で上書きされる。
+         * 別の端末・別のタブ・復帰した古い画面が「自分が持っている分だけ」を
+         * 送った瞬間、他で入力済みの項目がまとめて消える（原因が特定できない
+         * 「記入が消える」の正体）。触った項目だけを送れば、この経路は塞がる。
+         * ─────────────────────────────────────────────────────────── */
+        if(o.item!==undefined)args.push(new FP("assessments",changedDate,"items",o.item),a.items[o.item]);
+        if(o.removedItem!==undefined)args.push(new FP("assessments",changedDate,"items",o.removedItem),DEL);
+        const _memoList=o.memos||(o.memo!==undefined?[o.memo]:[]);
+        for(const mn of _memoList)args.push(new FP("assessments",changedDate,"memos",mn),(a.memos||{})[mn]??"");
+        args.push(new FP("assessments",changedDate,"date"),a.date||changedDate);
+        args.push(new FP("assessments",changedDate,"savedAt"),a.savedAt||nowIso());
+        if(a.scores!==undefined)args.push(new FP("assessments",changedDate,"scores"),a.scores);
+        if(a.totalScore!==undefined)args.push(new FP("assessments",changedDate,"totalScore"),a.totalScore);
+      }else{
+        args.push(new FP("assessments",changedDate),a);
+      }
     }
     for(const d of(removedDates||[])){
       args.push(new FP("assessments",d),firebase.firestore.FieldValue.delete());
@@ -993,19 +1050,44 @@ function firebaseDateToIso(v){
   return"";
 }
 /**
+ * 同じ日付のアセスメントシートを「項目単位」で統合する（2026-08-24 追加）。
+ *
+ * 入力済みの項目が消えないことを最優先にしている。したがって items / memos は
+ * 常に union し、キーが衝突したときだけ savedAt の新しい側を採る。
+ * 副作用として「複数チェックを全部外して未入力に戻した」操作が、別端末の古い
+ * 値で復活することがある。消えるより復活するほうが被害が小さいため、この形。
+ * （未入力に戻したい項目は、その端末で消し直せば次の保存で反映される）
+ */
+function mergeAssessmentSheets(local,remote){
+  if(!local)return remote;
+  if(!remote)return local;
+  const lt=String(local.savedAt||""),rt=String(remote.savedAt||"");
+  const newer=rt>=lt?remote:local;
+  const older=newer===remote?local:remote;
+  const out={...older,...newer};
+  out.items={...(older.items||{}),...(newer.items||{})};
+  out.memos={...(older.memos||{}),...(newer.memos||{})};
+  // union で項目が増えた＝合計点は開き直すまで古い。一覧に警告を出すための印
+  const n=Object.keys(out.items).length;
+  if(n>Object.keys(newer.items||{}).length)out._needsRecalc=true;
+  else if(out._needsRecalc&&n===Object.keys(newer.items||{}).length)delete out._needsRecalc;
+  return out;
+}
+
+/**
  * リモートのゲスト doc をローカルとマージ（部分更新で name 等が消えるのを防ぐ）
  */
 function mergeGuestFromRemote(docId,incoming,prev){
   const raw=incoming&&typeof incoming==="object"?incoming:{};
   const p=prev&&typeof prev==="object"?prev:{};
   const out={...p,...raw,id:docId};
-  // 日付ごとに savedAt の新しい方を採用（古いクラウドdocが手元の最新入力を潰さない）
+  // 日付ごとに統合する。**シートを丸ごと入れ替えない**（2026-08-24 改修）
+  // 旧実装は savedAt が新しい側のシートで丸ごと置き換えていたため、
+  // 「項目は少ないが savedAt だけ新しい」シートが降ってくると、
+  // 手元で入力済みの項目がまとめて消えた。項目・メモは必ず union する。
   out.assessments={...(p.assessments||{})};
   for(const[dt,ra]of Object.entries(raw.assessments||{})){
-    const pa=out.assessments[dt];
-    if(!pa||String((ra&&ra.savedAt)||"")>=String((pa&&pa.savedAt)||"")){
-      out.assessments[dt]=ra;
-    }
+    out.assessments[dt]=mergeAssessmentSheets(out.assessments[dt],ra);
   }
   const nm=String(out.name??"").trim();
   if(!nm){
@@ -1084,7 +1166,7 @@ function saveStore(st,opts){
   for(const gid of gids){
     const g=st.guests[gid];
     if(!g)continue;
-    saveGuestToCloud(gid,g,opts.date,opts.removedDates);
+    saveGuestToCloud(gid,g,opts.date,opts.removedDates,opts);
   }
 }
 // データマイグレーション: mx変更後に片側score:0を正しいscore:1へ自動修正
@@ -1234,12 +1316,26 @@ function renderGuestList(){
     const initial=(g.name||"?").replace(/\s/g,"")[0]||"?";
     const dateCount=Object.keys(g.assessments||{}).length;
     const metaParts=[g.age,g.gender,gt==="noic"?g.status:g.purpose].filter(Boolean);
+    // 直近シートの入力済み種目数を一覧に出す（2026-08-24 追加）。
+    // 入力が欠けたまま出力された事故に、一覧を見た時点で気づけるようにする。
+    let _doneHtml="";
+    try{
+      const _ld=Object.keys(g.assessments||{}).sort().reverse()[0];
+      if(_ld){
+        const _a=g.assessments[_ld];
+        const _n=Object.keys((_a&&_a.items)||{}).length;
+        const _all=getItemsFor(gt,g.schemaVer).length;
+        _doneHtml=" | 入力 "+_n+"/"+_all;
+        if(_n<_all)_doneHtml+=' <span style="color:#C1440E;font-weight:700">⚠未入力'+(_all-_n)+'</span>';
+        if(_a&&_a._needsRecalc)_doneHtml+=' <span style="color:#C1440E;font-weight:700">⚠開いて再計算</span>';
+      }
+    }catch(e){}
     return`<div>
       <div class="guest-row" onclick="selectGuest('${id}')">
         <div class="avatar" style="width:38px;height:38px;font-size:15px">${esc(initial)}</div>
         <div class="info">
           <div class="gname">${esc(g.name)} <span class="type-badge ${gt}">${typeLabel(gt)}</span></div>
-          <div class="gmeta">${esc(metaParts.join(" | "))} | 測定${dateCount}回 | ${fmtDate(g.updatedAt)}</div>
+          <div class="gmeta">${esc(metaParts.join(" | "))} | 測定${dateCount}回${_doneHtml} | ${fmtDate(g.updatedAt)}</div>
         </div>
         <div style="text-align:right">
           <div class="gscore">${sc!==null?sc:"—"}</div>
@@ -1374,6 +1470,18 @@ function renderAssessment(){
   const dates=Object.keys(g.assessments||{}).sort().reverse();
   dateInput.value=_dateByGid[currentGid]||dates[0]||today;
   _dateByGid[currentGid]=dateInput.value;
+
+  // 別端末から降ってきた分を項目単位で統合した結果、項目が増えたシートは
+  // 合計点が古いままなので、開いた時点で計算し直す（2026-08-24 追加）
+  const _sheet=(g.assessments||{})[dateInput.value];
+  if(_sheet&&_sheet._needsRecalc){
+    try{
+      calcScores(_sheet,getItemsFor(gt,g.schemaVer),getDomainsFor(gt,g.schemaVer));
+      delete _sheet._needsRecalc;
+      saveStore(store,{gid:currentGid,date:dateInput.value});
+      showToast("別の端末の入力を取り込んで、合計を計算し直しました");
+    }catch(e){console.warn("recalc failed",e);}
+  }
 
   buildItems(g,dateInput.value);
   dateInput.onchange=()=>{_dateByGid[currentGid]=dateInput.value;buildItems(g,dateInput.value);updateProgress();updateScoreBar();};
@@ -1562,7 +1670,7 @@ function pickOpt(el){
   a.savedAt=nowIso();
   g.updatedAt=nowIso();
   calcScores(a);
-  saveStore(store,{gid:currentGid,date});
+  saveStore(store,{gid:currentGid,date,item:item.n});
   updateProgress();
   updateScoreBar();
   updateRegionCount(item.r);
@@ -1642,7 +1750,7 @@ function pickSteppedExtra(el){
   sv.extras=extras;
   a.items[item.n]=sv;
   a.savedAt=nowIso();g.updatedAt=nowIso();
-  saveStore(store,{gid:currentGid,date});
+  saveStore(store,{gid:currentGid,date,item:item.n});
 }
 function saveStepped(idx,item,dirLabel,dirScore,degLabel,degScore){
   const score=degScore!==null?degScore:dirScore;
@@ -1656,7 +1764,7 @@ function saveStepped(idx,item,dirLabel,dirScore,degLabel,degScore){
   const existing=a.items[item.n]||{};
   a.items[item.n]={result,direction:dirLabel,degree:degLabel||"",extras:existing.extras||[],score};
   a.savedAt=nowIso();g.updatedAt=nowIso();
-  calcScores(a);saveStore(store,{gid:currentGid,date});
+  calcScores(a);saveStore(store,{gid:currentGid,date,item:item.n});
   updateProgress();updateScoreBar();updateRegionCount(item.r);
 }
 
@@ -1710,12 +1818,13 @@ function pickMulti(el){
   const g=store.guests[currentGid];
   const date=document.getElementById("assessDate").value;
   const a=getAssessment(g,date);
-  if(checked.length===0){delete a.items[item.n];}
+  const _removed=checked.length===0;
+  if(_removed){delete a.items[item.n];}
   else{a.items[item.n]={result,checked,score};}
   a.savedAt=nowIso();
   g.updatedAt=nowIso();
   calcScores(a);
-  saveStore(store,{gid:currentGid,date});
+  saveStore(store,{gid:currentGid,date,...(_removed?{removedItem:item.n}:{item:item.n})});
   updateProgress();
   updateScoreBar();
   updateRegionCount(item.r);
@@ -1723,7 +1832,15 @@ function pickMulti(el){
 
 // メモは1文字ごとに oninput で呼ばれるため、クラウド送信のみ0.8秒デバウンス
 // （ローカル保存は即時。旧実装はキー入力ごとに全ゲスト分を書き込み、無料枠を浪費していた）
-let _memoTimer=null,_memoKey=null;
+let _memoTimer=null,_memoKey=null,_memoGid=null,_memoDate=null;
+const _memoNames=new Set();
+/** 溜まったメモをまとめてクラウドへ送る（触ったメモ項目だけを送る） */
+function flushMemo(){
+  if(_memoTimer){clearTimeout(_memoTimer);_memoTimer=null;}
+  if(!_memoNames.size||!_memoGid)return;
+  const names=[..._memoNames];_memoNames.clear();
+  saveStore(store,{gid:_memoGid,date:_memoDate,memos:names});
+}
 function saveMemo(el){
   const idx=parseInt(el.dataset.idx);
   const item=curItems()[idx];
@@ -1735,9 +1852,11 @@ function saveMemo(el){
   g.updatedAt=nowIso();
   localSaveStore(store);
   const gid=currentGid,key=gid+"|"+date;
-  if(_memoTimer&&_memoKey===key)clearTimeout(_memoTimer);
-  _memoKey=key;
-  _memoTimer=setTimeout(()=>{_memoTimer=null;saveStore(store,{gid,date});},800);
+  if(_memoKey&&_memoKey!==key)flushMemo();   // 別シートへ移る前に取りこぼさず送る
+  _memoKey=key;_memoGid=gid;_memoDate=date;
+  _memoNames.add(item.n);
+  if(_memoTimer)clearTimeout(_memoTimer);
+  _memoTimer=setTimeout(flushMemo,800);
 }
 
 function calcScores(a,_items,_domains){
@@ -2394,6 +2513,16 @@ function exportAssessmentMD(){
   showToast("📝 脳アセスメント.md をダウンロードしました");
 }
 
+// タブを閉じる前に、書きかけのメモを送り、クラウド未保存があれば引き止める
+// （2026-08-24 追加。端末には入っているがクラウドに上がっていない状態で
+//   別の端末から開くと、そちらの内容が正になり、入力が見えなくなるため）
+window.addEventListener("beforeunload",function(e){
+  try{flushMemo();}catch(_){}
+  if(typeof _cloudPending!=="undefined"&&_cloudPending.size>0){
+    e.preventDefault();e.returnValue="";return"";
+  }
+});
+
 // ══════════════════════════════════════════════════════
 // INIT（クラウド版: Firestoreから読み込み → リアルタイム同期開始）
 // ══════════════════════════════════════════════════════
@@ -2401,6 +2530,7 @@ async function initApp(){
   // 1. まずlocalStorageから即時表示（オフライン対応）
   store=migrateStore(loadStore());
   renderGuestList();
+  checkLocalStorageRoom();
 
   await initFirebaseFromJson();
 
